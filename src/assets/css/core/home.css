@@ -1,0 +1,375 @@
+/* ── Home screen: side nav + movie grid / cards ──────────────────────────── */
+
+.home-page {
+  height: calc(100vh - 50px);
+}
+
+.home-layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.side-nav-col {
+  width: 200px;
+  min-width: 200px;
+  border-right: 1px solid #1a2333;
+  background: #0b1220;
+  display: flex;
+  flex-direction: column;
+}
+
+.side-nav-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 6px 4px 14px;
+  border-bottom: 1px solid #1a2333;
+}
+
+.side-nav-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #64748b;
+}
+
+.side-nav {
+  flex: 1;
+}
+
+/* ── Nav reorder mode ── */
+.nav-reorder-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 8px;
+}
+
+.nav-reorder-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  margin-bottom: 2px;
+  border: 1px solid #1a2333;
+  border-radius: 6px;
+  background: #0e1525;
+  cursor: grab;
+}
+
+.nav-reorder-item.dragging {
+  opacity: 0.45;
+  border-color: #86d411;
+}
+
+.nav-reorder-handle {
+  color: #64748b;
+  flex: 0 0 auto;
+}
+
+.nav-reorder-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.86rem;
+  color: #e2e8f0;
+}
+
+.nav-reorder-hint {
+  margin-top: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: #475569;
+}
+
+.nav-reorder-error {
+  margin-top: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  color: #f28b82;
+}
+
+.side-nav .q-tab__label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.side-nav .q-tab {
+  justify-content: flex-start;
+  padding: 4px 14px;
+  min-height: 32px;
+}
+
+.side-nav .q-tab__content {
+  align-items: flex-start;
+}
+
+.home-panel {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* ── Stream sub-tabs (slim bar above the browse area) ── */
+.stream-tabs {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 4px 12px;
+}
+
+.stream-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #64748b;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.stream-tab:hover {
+  color: #e2e8f0;
+  background: #0e1525;
+}
+
+.stream-tab.active {
+  color: #86d411;
+  background: rgba(134, 212, 17, 0.12);
+  border-color: rgba(134, 212, 17, 0.4);
+}
+
+.stream-tab:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.stream-tab:disabled:hover {
+  color: #64748b;
+  background: transparent;
+}
+
+.coming-soon {
+  height: 100%;
+  min-height: 300px;
+}
+
+/* ── Catalog panel (left-nav catalog tab: header + item grid) ── */
+.catalog-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 300px;
+  padding: 16px 24px 24px;
+}
+
+.catalog-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.catalog-panel-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  background: #0e1525;
+  border: 1px solid #1a2333;
+  margin-bottom: 14px;
+}
+
+.catalog-panel-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.catalog-panel-meta {
+  margin-top: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: #86d411;
+}
+
+.catalog-panel-desc {
+  margin-top: 10px;
+  max-width: 480px;
+  color: #94a3b8;
+  font-size: 0.95rem;
+}
+
+.catalog-panel-path {
+  margin-top: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.coming-soon-text {
+  margin-top: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
+
+.catalog-items-grid {
+  width: 100%;
+  margin-top: 24px;
+}
+
+.catalog-compact-title {
+  align-self: flex-start;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #e2e8f0;
+  margin-bottom: 4px;
+}
+
+/* ── Movie grid / cards ── */
+.movie-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 210px));
+  justify-content: start;
+  gap: 8px;
+}
+
+.movie-card {
+  width: 100%;
+  background: #0e1525;
+  border: 1px solid #1a2333;
+  border-radius: 10px;
+  overflow: hidden;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.movie-card:hover {
+  transform: translateY(-3px);
+  border-color: #86d411;
+}
+
+.poster-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
+  height: 0;
+  padding-bottom: 150%;
+  overflow: hidden;
+}
+
+.poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #1a2333;
+}
+
+.poster-fallback {
+  background: #1a2333;
+}
+
+.rating {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(8, 12, 22, 0.85);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: #ffaa33;
+}
+
+.play-overlay {
+  background: rgba(8, 12, 22, 0.78);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.15s ease,
+    visibility 0.15s ease;
+}
+
+.movie-card:hover .play-overlay,
+.movie-card:focus-within .play-overlay {
+  opacity: 1;
+  visibility: visible;
+}
+
+.play-overlay .q-btn {
+  transform: translateY(-24px);
+}
+
+.movie-overview {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  left: 10px;
+  color: #f1f5f9;
+  font-size: 1rem;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+}
+
+.movie-title {
+  font-weight: 700;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  color: #e2e8f0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.movie-year {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  margin-top: 2px;
+}
+
+.catalog-edit-btn,
+.info-btn {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 2;
+}
+
+.movie-card:hover .catalog-edit-btn,
+.movie-card:focus-within .catalog-edit-btn,
+.movie-card:hover .info-btn,
+.movie-card:focus-within .info-btn {
+  opacity: 1;
+}

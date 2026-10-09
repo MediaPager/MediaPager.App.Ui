@@ -1,0 +1,45 @@
+/* ── Plugin activity drawer ─────────────────────────────────────────────── */
+
+.activity-drawer {
+  background: #0e1525;
+  border-left: 1px solid #1a2333;
+  display: flex;
+  flex-direction: column;
+}
+
+.activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-bottom: 1px solid #1a2333;
+}
+
+.activity-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.activity-list {
+  flex: 1;
+}
+
+.activity-job {
+  padding: 12px;
+  border-bottom: 1px solid #1a2333;
+}
+
+.activity-job-title {
+  color: #e2e8f0;
+  font-weight: 600;
+  max-width: 200px;
+}
+
+.activity-job-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}

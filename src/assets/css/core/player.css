@@ -1,0 +1,37 @@
+/* ── Video player dialog ─────────────────────────────────────────────────── */
+
+.play-loading {
+  position: fixed;
+  inset: 0;
+  /* Above every q-dialog/menu (Quasar's .q-dialog is z-index 6000, menus ~9000,
+     notify/loading ~9500) so it stays visible over the TV sheet, the movie
+     sheet, and the open player while a stream (or the next episode) resolves. */
+  z-index: 10000;
+  background: rgba(8, 12, 22, 0.8);
+  flex-direction: column;
+}
+
+.player-card {
+  background: #080c16;
+  width: 80vw;
+  height: 80vh;
+  max-width: none;
+  max-height: none;
+}
+
+.q-dialog__inner--minimized > .player-card {
+  max-width: none;
+}
+
+.player-bar {
+  background: #0e1525;
+  border-bottom: 1px solid #1a2333;
+  height: 40px;
+}
+
+.player-wrap {
+  background: #000;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}

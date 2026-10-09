@@ -1,0 +1,49 @@
+/* ── Desktop overrides (≥701px) ───────────────────────────────────────────
+   Desktop-only affordances. Loaded after mobile.css so equal-specificity rules
+   win by source order. */
+
+@media (min-width: 701px) {
+  /* Detail screen: the text column shrinks to its content so Play sits
+     immediately to the right of the title / year-meta / genre rows, vertically
+     centered against them; mobile keeps the full-width action row (hidden here). */
+  .sheet-header-text {
+    flex: 0 1 auto;
+  }
+
+  .sheet-header-actions {
+    display: flex;
+    align-items: center;
+    padding-left: 16px;
+  }
+
+  .sheet-actions {
+    display: none;
+  }
+
+  .sheet-actions-mobile {
+    display: none;
+  }
+
+  /* Bigger poster and title on the desktop detail screen. */
+  .sheet-poster {
+    width: 180px;
+    height: 270px;
+  }
+
+  .sheet-title {
+    font-size: 2.2rem;
+  }
+
+  .sheet-content {
+    padding-top: 30vh;
+  }
+
+  /* Player dialog: Quasar clamps non-maximized dialogs to 560px max-width on
+     the inner content div; override it for the embed player (80×80). */
+  .embed-player-dialog .q-dialog__inner > .player-shell {
+    width: 80vw;
+    max-width: 80vw;
+    height: 80vh;
+    max-height: 80vh;
+  }
+}

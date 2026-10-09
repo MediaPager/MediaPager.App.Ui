@@ -1,0 +1,137 @@
+/* ── Subtitles (panel + style editor) ────────────────────────────────────── */
+
+.subtitle-panel {
+  position: absolute;
+  top: 52px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  width: min(300px, calc(100% - 24px));
+  background: rgba(14, 21, 37, 0.97);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.subtitle-toggle {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 6;
+  background: rgba(14, 21, 37, 0.85);
+}
+
+.panel-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #86d411;
+  margin-bottom: 6px;
+}
+
+.sub-list {
+  min-height: 120px;
+  border: 1px solid #1a2333;
+  border-radius: 8px;
+}
+
+.sub-release {
+  font-size: 0.78rem;
+  word-break: break-all;
+  white-space: normal;
+}
+
+.sub-active {
+  background: rgba(134, 212, 17, 0.12);
+  border-left: 2px solid #86d411;
+}
+
+.sub-tabs {
+  background: #0b1220;
+  border-radius: 8px;
+  border: 1px solid #1a2333;
+}
+
+.sub-tabs .q-tab__label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.sub-tab-panels {
+  background: transparent;
+  color: #e2e8f0;
+}
+
+.sub-tab-panels .q-tab-panel {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+/* ── Subtitle style editor ── */
+.color-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.color-label {
+  color: #cbd5f5;
+  font-size: 0.85rem;
+}
+
+.color-swatch {
+  width: 44px;
+  height: 28px;
+  min-width: 44px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.color-popup {
+  background: #0f172a;
+  border-radius: 8px;
+  min-width: 260px;
+}
+
+.color-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+}
+
+.color-hex {
+  color: #86d411;
+}
+
+.rgba-fields {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.rgba-field input {
+  text-align: center;
+}
+
+.hex-prefix {
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+  padding-left: 4px;
+}
+
+.style-color {
+  max-width: 100%;
+  border-radius: 8px;
+}

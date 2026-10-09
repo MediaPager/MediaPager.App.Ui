@@ -1,0 +1,24 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@400;600;700&display=swap');
+
+/* ── Entry point: global base + all app styles ────────────────────────────
+   Load order matters: core → screens → mobile overrides → desktop overrides
+   (later files win on equal specificity). All @imports must precede other rules. */
+
+@import './core/auth.css';
+@import './core/header.css';
+@import './core/home.css';
+@import './core/player.css';
+@import './core/subtitles.css';
+@import './core/activity.css';
+
+@import './screens/settings.css';
+@import './screens/profile.css';
+@import './screens/detail-sheet.css';
+
+@import './mobile.css';
+@import './desktop.css';
+
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background: #080c16;
+}

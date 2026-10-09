@@ -1,0 +1,55 @@
+/* ── Auth screen (login / forgot / register) ─────────────────────────────── */
+
+.auth-page {
+  min-height: calc(100vh - 50px);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(134, 212, 17, 0.08), transparent 55%),
+    #080c16;
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  padding: 28px;
+  background: #0e1525;
+  border: 1px solid #263348;
+  border-radius: 8px;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.auth-brand-icon {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+.auth-title {
+  color: #f1f5f9;
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin-bottom: 18px;
+}
+
+.auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.auth-message {
+  background: rgba(134, 212, 17, 0.1);
+  border: 1px solid rgba(134, 212, 17, 0.5);
+  color: #d9f99d;
+}
+
+.error-banner {
+  background: #0e1525;
+  border: 1px solid #ff5f56;
+  color: #e2e8f0;
+}
