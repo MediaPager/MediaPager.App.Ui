@@ -51,7 +51,8 @@ The UI targets the API at `http://localhost:5074` by default. Override with
 `{ "apiBaseUrl": "http://your-api" }` (loaded before mount).
 
 > **Note:** history routing requires the web host to serve a history fallback (unknown paths
-> → `index.html`). The launcher and nginx config do this; a bare static server needs a shim.
+> → `index.html`). The MediaPager API host provides this fallback when serving the production
+> SPA; a bare static server needs an equivalent fallback.
 
 ## Build
 
