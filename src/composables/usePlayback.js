@@ -6,6 +6,7 @@ import { api, apiOrigin } from './useApi'
 import { useMovies } from './useMovies'
 import { useSources } from './useSources'
 import { useCatalogItems } from './useCatalogItems'
+import { formatPluginError } from './pluginErrors'
 
 // Player + subtitles share the single video.js player instance, so they live in
 // one composable. State is module-level so the player dialog and any triggers stay in sync.
@@ -170,7 +171,7 @@ export function usePlayback() {
       if (player) loadCurrentSource()
       loadSubtitles()
     } catch (e) {
-      error.value = e.response?.data?.detail ?? e.response?.data?.error ?? e.message
+      error.value = formatPluginError(e)
     } finally {
       endPlayLoading()
     }
@@ -198,7 +199,7 @@ export function usePlayback() {
       if (player) loadCurrentSource()
       loadSubtitles()
     } catch (e) {
-      error.value = e.response?.data?.detail ?? e.response?.data?.error ?? e.message
+      error.value = formatPluginError(e)
     } finally {
       endPlayLoading()
     }

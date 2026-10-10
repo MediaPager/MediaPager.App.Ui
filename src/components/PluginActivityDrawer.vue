@@ -1,6 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { usePluginActivity } from '../composables/usePluginActivity'
+import { formatPluginError } from '../composables/pluginErrors'
 
 const {
   activityDrawerOpen,
@@ -38,6 +39,10 @@ function stateColor(state) {
     default: return 'primary'
   }
 }
+
+function activityErrorText(activity) {
+  return formatPluginError(activity.error, activity.message ?? activity.status ?? '')
+}
 </script>
 
 <template>
@@ -65,7 +70,7 @@ function stateColor(state) {
           <q-icon :name="notification.level?.toLowerCase() === 'error' ? 'error' : 'notifications'" :color="levelColor(notification.level)" />
           <div class="col">
             <div class="text-weight-medium">{{ notification.title }}</div>
-            <div v-if="notification.message" class="text-caption text-grey-5">{{ notification.message }}</div>
+            <div v-if="activityErrorText(notification)" class="text-caption text-grey-5">{{ activityErrorText(notification) }}</div>
           </div>
           <q-btn flat round dense size="sm" icon="close" aria-label="Dismiss" @click="dismissNotification(notification)" />
         </div>
@@ -80,7 +85,7 @@ function stateColor(state) {
               {{ job.state }}
             </q-chip>
           </div>
-          <div v-if="job.status" class="text-caption text-grey-6">{{ job.status }}</div>
+          <div v-if="activityErrorText(job)" class="text-caption text-grey-6">{{ activityErrorText(job) }}</div>
           <q-linear-progress
             v-if="job.progress != null"
             :value="job.progress"

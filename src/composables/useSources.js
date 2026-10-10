@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { api } from './useApi'
+import { formatPluginError } from './pluginErrors'
 
 // Plugin discovery catalog (GET /sources): which plugins are loaded, what they can do,
 // the stream sources they contribute to nav, and subtitle providers. Drives the
@@ -25,7 +26,7 @@ export function useSources() {
       subtitles.value = data?.subtitles ?? []
       loaded.value = true
     } catch (requestError) {
-      error.value = requestError.response?.data?.detail ?? 'Could not load sources.'
+      error.value = formatPluginError(requestError, 'Could not load sources.')
     } finally {
       loading.value = false
     }
@@ -105,7 +106,7 @@ export function useSources() {
       state.totalPages = data?.totalPages ?? 1
       state.loaded = true
     } catch (requestError) {
-      state.error = requestError.response?.data?.detail ?? 'Could not load this source.'
+      state.error = formatPluginError(requestError, 'Could not load this source.')
     } finally {
       state.loading = false
     }

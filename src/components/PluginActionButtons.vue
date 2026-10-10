@@ -5,6 +5,7 @@ import { Notify } from 'quasar'
 import { api } from '../composables/useApi'
 import { useSources } from '../composables/useSources'
 import { usePluginActivity } from '../composables/usePluginActivity'
+import { formatPluginError } from '../composables/pluginErrors'
 import { useAuth } from '../composables/useAuth'
 import { useCatalogItems } from '../composables/useCatalogItems'
 
@@ -123,7 +124,7 @@ async function activate(entry) {
         Notify.create({
           type: 'negative',
           icon: 'error',
-          message: error.response?.data?.detail ?? 'Could not open catalog item metadata.',
+          message: formatPluginError(error, 'Could not open catalog item metadata.'),
         })
       }
     }
@@ -141,7 +142,7 @@ async function activate(entry) {
     Notify.create({
       type: 'negative',
       icon: 'error',
-      message: error.response?.data?.detail ?? `Could not run ${action.label}.`,
+      message: formatPluginError(error, `Could not run ${action.label}.`),
     })
   }
 }

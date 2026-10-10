@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useSources } from '../composables/useSources'
 import { useCatalogItems } from '../composables/useCatalogItems'
+import { formatPluginError } from '../composables/pluginErrors'
 import PluginActionButtons from './PluginActionButtons.vue'
 
 // Generic data-driven detail sheet for a stream-provider title: fetches
@@ -34,7 +35,7 @@ watch([open, () => props.externalId], async ([isOpen, id]) => {
   try {
     details.value = await fetchDetails(props.sourceKey, id)
   } catch (requestError) {
-    error.value = requestError.response?.data?.detail ?? 'Could not load details.'
+    error.value = formatPluginError(requestError, 'Could not load details.')
   } finally {
     loading.value = false
   }
