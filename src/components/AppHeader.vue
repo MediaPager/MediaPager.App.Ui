@@ -45,6 +45,8 @@ const { navCatalogs, fetchNavCatalogs } = useCatalogs()
 // One unified search box, the same on every tab: it type-aheads across all media
 // categories. Provider-backed kinds can be selected and played directly from the results.
 const searchText = ref('')
+const searchSubmitting = ref(false)
+let searchSubmitSequence = 0
 const isTvSearch = computed(() => streamTab.value === 'tv')
 const activeSourceKey = computed(() => {
   if (isSourceTab(streamTab.value)) {
@@ -66,6 +68,7 @@ const typeaheadLoading = ref(false)
 const typeaheadRect = ref({ top: 0, left: 0, width: 0 })
 const typeaheadPopup = ref(null)
 let typeaheadTimer = null
+let typeaheadController = null
 const desktopSearchInput = ref(null)
 const mobileSearchInput = ref(null)
 const focusedSearch = ref('desktop')
@@ -120,6 +123,7 @@ function openTypeahead() {
 }
 
 function closeTypeahead() {
+  cancelTypeahead()
   if (!typeaheadOpen.value) return
   typeaheadOpen.value = false
   unbindTypeaheadListeners()
@@ -128,12 +132,15 @@ function closeTypeahead() {
 function cancelTypeahead() {
   clearTimeout(typeaheadTimer)
   typeaheadTimer = null
+  typeaheadController?.abort()
+  typeaheadController = null
+  typeaheadLoading.value = false
 }
 
 function onSearchFocus(which) {
   focusedSearch.value = which
   const text = searchText.value.trim()
-  if (!text) return
+  if (text.length < 2) return
   if (typeaheadResults.value.length) openTypeahead()
   else scheduleTypeahead()
 }
@@ -141,7 +148,7 @@ function onSearchFocus(which) {
 // v-model already updated searchText; react by opening a loading popup + debounced fetch.
 function onSearchInput() {
   const text = searchText.value.trim()
-  if (!text) {
+  if (text.length < 2) {
     cancelTypeahead()
     closeTypeahead()
     typeaheadResults.value = []
@@ -154,24 +161,35 @@ function onSearchInput() {
 }
 
 function scheduleTypeahead() {
-  cancelTypeahead()
+  clearTimeout(typeaheadTimer)
+  typeaheadTimer = null
+  typeaheadController?.abort()
+  typeaheadController = null
   const text = searchText.value.trim()
-  if (!text) return
+  if (text.length < 2) return
   typeaheadTimer = setTimeout(() => runTypeahead(text), 250)
 }
 
 async function runTypeahead(text) {
+  const controller = new AbortController()
+  typeaheadController = controller
   try {
-    const { data } = await api.get('/search', { params: { q: text, limit: 5 } })
-    if (searchText.value.trim() !== text) return
+    const { data } = await api.get('/search', {
+      params: { q: text, limit: 5 },
+      signal: controller.signal,
+    })
+    if (controller.signal.aborted || searchText.value.trim() !== text) return
     typeaheadResults.value = data
-    typeaheadLoading.value = false
     if (typeaheadOpen.value) positionTypeahead()
   } catch {
-    if (searchText.value.trim() !== text) return
+    if (controller.signal.aborted || searchText.value.trim() !== text) return
     typeaheadResults.value = []
-    typeaheadLoading.value = false
     closeTypeahead()
+  } finally {
+    if (typeaheadController === controller) {
+      typeaheadController = null
+      typeaheadLoading.value = false
+    }
   }
 }
 
@@ -184,14 +202,24 @@ function metadataSummary(metadata) {
   return (metadata ?? []).slice(0, 3).map((field) => field.value).filter(Boolean).join(' · ')
 }
 
+function streamSourceForHit(hit) {
+  const declaredSource = sourceTabs.value.find((source) => source.sourceKey === hit.sourceKey)
+  if (declaredSource) return declaredSource.sourceKey
+  if (hit.kind === 'music') {
+    return sourceTabs.value.find((source) => String(source.kind ?? '').toLowerCase() === 'music')?.sourceKey ?? null
+  }
+  return null
+}
+
 function searchQueueItem(hit) {
+  const sourceKey = streamSourceForHit(hit)
   return {
     ...hit,
     id: hit.catalogItemId ?? hit.id,
     externalId: String(hit.externalId ?? hit.id),
     catalogItemId: hit.catalogItemId ?? null,
     kind: hit.kind,
-    sourceKey: hit.sourceKey ?? null,
+    sourceKey,
     artworkUrl: hit.artworkUrl ?? null,
   }
 }
@@ -199,9 +227,10 @@ function searchQueueItem(hit) {
 function playSearchHit(hit) {
   closeTypeahead()
   const item = searchQueueItem(hit)
-  return item.sourceKey
-    ? onPlaySourceItem(item, item.sourceKey)
-    : onPlay(item)
+  if (item.sourceKey) return onPlaySourceItem(item, item.sourceKey)
+  if (hit.kind === 'movie' || hit.kind === 'tv') return onPlay({ ...item, sourceKey: null })
+
+  Notify.create({ type: 'negative', icon: 'error', message: 'No stream source is available for this result.' })
 }
 
 function queueSearchHit(hit) {
@@ -264,17 +293,23 @@ async function pickSearchResult(hit) {
   else if (hit.kind === 'tv') openTvDetails(base)
 }
 
-function doSearch() {
+async function doSearch() {
+  const submitSequence = ++searchSubmitSequence
   closeTypeahead()
   const text = searchText.value.trim()
-  if (activeSourceKey.value) {
-    searchSource(activeSourceKey.value, text)
-  } else if (isTvSearch.value) {
-    tvQuery.value = text
-    searchTv()
-  } else {
-    query.value = text
-    search()
+  searchSubmitting.value = true
+  try {
+    if (activeSourceKey.value) {
+      await searchSource(activeSourceKey.value, text)
+    } else if (isTvSearch.value) {
+      tvQuery.value = text
+      await searchTv()
+    } else {
+      query.value = text
+      await search()
+    }
+  } finally {
+    if (submitSequence === searchSubmitSequence) searchSubmitting.value = false
   }
 }
 
@@ -326,7 +361,8 @@ function openProfile() {
         @keyup.enter="doSearch"
       >
         <template #append>
-          <q-btn flat round dense icon="search" color="primary" @click="doSearch" />
+          <q-spinner-dots v-if="searchSubmitting" color="primary" size="1.35rem" aria-label="Searching" />
+          <q-btn v-else flat round dense icon="search" color="primary" aria-label="Search" @click="doSearch" />
         </template>
       </q-input>
       <q-btn
@@ -424,7 +460,8 @@ function openProfile() {
         @keyup.enter="doSearch"
       >
         <template #append>
-          <q-btn flat round dense icon="search" color="primary" @click="doSearch" />
+          <q-spinner-dots v-if="searchSubmitting" color="primary" size="1.35rem" aria-label="Searching" />
+          <q-btn v-else flat round dense icon="search" color="primary" aria-label="Search" @click="doSearch" />
         </template>
       </q-input>
       <q-btn

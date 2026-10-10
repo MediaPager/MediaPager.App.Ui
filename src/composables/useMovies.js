@@ -44,7 +44,7 @@ export function useMovies() {
   function search() {
     page.value = 1
     movieSheetOpen.value = false
-    fetchMovies()
+    return fetchMovies()
   }
 
   // Jump from a cast member on the detail sheet to a cast-mode search on the grid.

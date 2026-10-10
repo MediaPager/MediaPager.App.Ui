@@ -43,7 +43,7 @@ export function useTvShows() {
   function searchTv() {
     tvPage.value = 1
     tvSheetOpen.value = false
-    fetchTvShows()
+    return fetchTvShows()
   }
 
   function goToTvPage(p) {

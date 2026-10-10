@@ -84,6 +84,11 @@ export function useSources() {
       ?? sources.value[0]?.key
       ?? null
   })
+  const defaultTvSourceKey = computed(() => {
+    const tvKinds = ['tv', 'tvshow', 'tv-show', 'tv-shows']
+    return sources.value.find((source) => tvKinds.includes(String(source.kind ?? '').toLowerCase()))?.key
+      ?? defaultSourceKey.value
+  })
 
   function stateFor(sourceKey) {
     if (!browseState.value[sourceKey]) {
@@ -175,6 +180,7 @@ export function useSources() {
     sourceTabs,
     hasOnlineStreamProvider,
     defaultSourceKey,
+    defaultTvSourceKey,
     fetchSources,
     fetchOfficialPlugins,
     stateFor,

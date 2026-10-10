@@ -54,6 +54,11 @@ function goToPage(page) {
       {{ state.error }}
     </q-banner>
 
+    <div v-if="state.loading" class="source-search-status row items-center justify-center q-mb-md" role="status" aria-live="polite">
+      <q-spinner-dots color="primary" size="1.5rem" />
+      <span>{{ state.query ? `Searching “${state.query}”…` : 'Loading results…' }}</span>
+    </div>
+
     <div class="movie-grid">
       <div v-for="item in state.items" :key="item.externalId" class="movie-grid-item">
         <q-card dark class="movie-card full-height column" @click="openDetails(item)">
@@ -120,10 +125,6 @@ function goToPage(page) {
       </div>
     </div>
 
-    <div v-if="state.loading" class="flex flex-center q-my-xl">
-      <q-spinner-dots color="primary" size="3rem" />
-    </div>
-
     <div v-if="!state.loading && !state.error && state.loaded && state.items.length === 0" class="text-grey-6 text-center q-my-xl">
       no results
     </div>
@@ -146,3 +147,11 @@ function goToPage(page) {
 
   </div>
 </template>
+
+<style scoped>
+.source-search-status {
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  color: #86d411;
+}
+</style>

@@ -10,7 +10,7 @@ import MediaDetailsActions from './MediaDetailsActions.vue'
 
 const { error } = useMovies()
 const { localItemFor } = useCatalogItems()
-const { defaultSourceKey } = useSources()
+const { defaultTvSourceKey } = useSources()
 const { currentMovie, onPlayEpisode, setTvNextHandler } = usePlayback()
 const { autoplay } = useUserSettings()
 
@@ -101,9 +101,9 @@ function episodeQueueItem(ep) {
     title: `${show?.title ?? 'TV Show'} – S${season}E${ep.episodeNumber}${ep.title ? ` · ${ep.title}` : ''}`,
     overview: ep.overview ?? show?.overview ?? '',
     artworkUrl: ep.stillUrl ?? show?.posterUrl ?? null,
-    sourceKey: show.sourceKey ?? defaultSourceKey.value,
+    sourceKey: show.sourceKey ?? defaultTvSourceKey.value,
     isEpisode: true,
-    show: { ...show, sourceKey: show.sourceKey ?? defaultSourceKey.value },
+    show: { ...show, sourceKey: show.sourceKey ?? defaultTvSourceKey.value },
     season,
     episode: ep.episodeNumber,
     episodeInfo: ep,

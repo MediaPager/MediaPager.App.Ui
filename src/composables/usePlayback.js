@@ -1,5 +1,6 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import videojs from 'video.js'
+import { Notify } from 'quasar'
 import '@videojs/http-streaming'
 import 'video.js/dist/video-js.css'
 import { api, apiOrigin } from './useApi'
@@ -101,7 +102,7 @@ watch(subtitleStyle, (value) => {
 
 export function usePlayback() {
   const { error, isTouchDevice } = useMovies()
-  const { loaded: sourcesLoaded, fetchSources, defaultSourceKey } = useSources()
+  const { loaded: sourcesLoaded, fetchSources, defaultSourceKey, defaultTvSourceKey } = useSources()
   const { localItemFor, findLocalItemByExternalId, findLocalItemById } = useCatalogItems()
   const { autoplay } = useUserSettings()
   const playlist = usePlaylist()
@@ -220,6 +221,8 @@ export function usePlayback() {
     playbackError.value = ''
     retryCurrentPlayback = () => onPlayEpisode(show, season, episode, ep, { preserveQueue: true })
     try {
+      if (!sourcesLoaded.value) await fetchSources()
+      const sourceKey = show?.sourceKey ?? defaultTvSourceKey.value
       if (!preserveQueue) {
         playlist.replaceQueueWithItem({
           kind: 'tv',
@@ -227,9 +230,9 @@ export function usePlayback() {
           title: `${show.title} – S${season}E${episode}${ep?.title ? ` · ${ep.title}` : ''}`,
           overview: ep?.overview ?? show.overview ?? '',
           artworkUrl: ep?.stillUrl ?? show.posterUrl ?? null,
-          sourceKey: show.sourceKey ?? null,
+          sourceKey,
           isEpisode: true,
-          show,
+          show: { ...show, sourceKey },
           season,
           episode,
           episodeInfo: ep,
@@ -241,7 +244,7 @@ export function usePlayback() {
       const resolved = await resolveProviderStream(show.id, {
         season,
         episode,
-        sourceKey: show.sourceKey ?? null,
+        sourceKey,
       })
       streamUrl.value = resolved.url
       streamType.value = resolved.contentType
@@ -252,7 +255,7 @@ export function usePlayback() {
         isEpisode: true,
         directPlayback: resolved.directPlayback,
         show,
-        sourceKey: show.sourceKey ?? null,
+        sourceKey,
         season,
         episode,
         title: `${show.title} – S${season}E${episode}${ep?.title ? ` · ${ep.title}` : ''}`,
@@ -305,7 +308,9 @@ export function usePlayback() {
       if (player) { await nextTick(); loadCurrentSource() }
       if (String(item.kind ?? '').toLowerCase() !== 'music') loadSubtitles()
     } catch (requestError) {
-      error.value = formatPluginError(requestError)
+      const message = formatPluginError(requestError)
+      error.value = message
+      Notify.create({ type: 'negative', icon: 'error', message })
     } finally {
       endPlayLoading()
     }
