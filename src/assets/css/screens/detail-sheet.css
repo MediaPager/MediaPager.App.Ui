@@ -380,6 +380,15 @@
   min-width: 0;
 }
 
+.tv-episode-actions {
+  flex: 0 0 auto;
+  margin-top: 4px;
+}
+
+.tv-episode-actions .q-btn {
+  padding: 4px;
+}
+
 .tv-episode-title {
   font-weight: 700;
   font-size: 0.84rem;

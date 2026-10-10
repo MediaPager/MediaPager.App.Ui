@@ -10,8 +10,6 @@ import { useCatalogItems } from '../composables/useCatalogItems'
 import { useSources } from '../composables/useSources'
 import { usePluginActivity } from '../composables/usePluginActivity'
 import { useAuth } from '../composables/useAuth'
-import MovieDetailSheet from './MovieDetailSheet.vue'
-import TvShowDetailSheet from './TvShowDetailSheet.vue'
 import SourceBrowseGrid from './SourceBrowseGrid.vue'
 import PluginCustomUiFrame from './PluginCustomUiFrame.vue'
 import NotFoundPage from './NotFoundPage.vue'
@@ -103,10 +101,15 @@ watch(() => route.params.tab, (tab) => {
 
 const activeStreamTab = computed(() => streamTabs.value.find((tab) => tab.key === activeMediaKind.value) ?? null)
 
-const activeSourceTab = computed(() =>
-  isSourceTab(streamTab.value)
-    ? sourceTabs.value.find((tab) => `source:${tab.sourceKey}` === streamTab.value) ?? null
-    : null)
+const activeSourceTab = computed(() => {
+  if (isSourceTab(streamTab.value)) {
+    return sourceTabs.value.find((tab) => `source:${tab.sourceKey}` === streamTab.value) ?? null
+  }
+  if (activeMediaKind.value === 'music') {
+    return sourceTabs.value.find((tab) => String(tab.kind ?? '').toLowerCase() === 'music') ?? null
+  }
+  return null
+})
 
 // 404 handling: a stream tab that matches neither a built-in kind nor a loaded source,
 // or a catalog name that isn't in the user's nav, is a bad URL — render the 404 page
@@ -302,7 +305,17 @@ function onDragEnd() {
           indicator-color="primary"
           @update:model-value="closeMobileNav"
         >
-          <q-tab v-if="showStreamNav" name="stream" label="Stream" />
+          <q-tab v-if="showStreamNav" name="stream" aria-label="Stream">
+            <span class="stream-nav-label">
+              <span class="q-tab__label">Stream</span>
+              <svg class="stream-nav-signal" viewBox="0 0 24 24" aria-hidden="true">
+                <path class="stream-nav-wave stream-nav-wave--3" d="M3 8.5c5-4.2 13-4.2 18 0" />
+                <path class="stream-nav-wave stream-nav-wave--2" d="M6 11.5c3.5-2.9 8.5-2.9 12 0" />
+                <path class="stream-nav-wave stream-nav-wave--1" d="M9 14.5c1.8-1.5 4.2-1.5 6 0" />
+                <circle class="stream-nav-signal-dot" cx="12" cy="18.5" r="1.25" />
+              </svg>
+            </span>
+          </q-tab>
           <template v-if="!reorderMode">
             <q-tab
               v-for="catalog in navCatalogs"
@@ -370,7 +383,10 @@ function onDragEnd() {
         @click="mobileNavOpen = false"
       />
 
-      <div class="home-panel">
+      <div
+        class="home-panel"
+        :class="{ 'home-panel--with-tabs': homeTab === 'stream' || homeTab.startsWith('catalog:') }"
+      >
         <NoCatalogsScreen v-if="noCatalogsScreen" />
         <NotFoundPage v-else-if="streamTabNotFound || catalogNotFound" />
         <template v-else>
@@ -513,6 +529,17 @@ function onDragEnd() {
                         </div>
                       </template>
                     </q-img>
+                    <q-btn
+                      round
+                      unelevated
+                      color="dark"
+                      text-color="primary"
+                      icon="info"
+                      size="sm"
+                      class="poster-info-button"
+                      :aria-label="`Browse ${show.title}`"
+                      @click.stop="openTvDetails(show)"
+                    />
                     <PluginActionButtons
                       surface="PosterCard"
                       kind="tv"
@@ -529,16 +556,6 @@ function onDragEnd() {
                       {{ show.voteAverage.toFixed(1) }}
                     </div>
                     <div class="play-overlay absolute-full flex flex-center">
-                      <q-btn
-                        round
-                        unelevated
-                        color="primary"
-                        text-color="dark"
-                        icon="info"
-                        size="lg"
-                        :aria-label="`Browse ${show.title}`"
-                        @click.stop="openTvDetails(show)"
-                      />
                       <div class="movie-overview">
                         {{ show.overview || 'No description available.' }}
                       </div>
@@ -733,8 +750,6 @@ function onDragEnd() {
       </div>
     </div>
 
-    <MovieDetailSheet />
-    <TvShowDetailSheet />
     <CatalogItemEditDialog
       v-model:open="itemEditOpen"
       v-model:item="itemEditTarget"

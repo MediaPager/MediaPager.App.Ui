@@ -5,10 +5,12 @@ import { usePlayback } from '../composables/usePlayback'
 import { useUserSettings } from '../composables/useUserSettings'
 import { formatRuntime, useMovies } from '../composables/useMovies'
 import { useCatalogItems } from '../composables/useCatalogItems'
-import PluginActionButtons from './PluginActionButtons.vue'
+import { useSources } from '../composables/useSources'
+import MediaDetailsActions from './MediaDetailsActions.vue'
 
 const { error } = useMovies()
 const { localItemFor } = useCatalogItems()
+const { defaultSourceKey } = useSources()
 const { currentMovie, onPlayEpisode, setTvNextHandler } = usePlayback()
 const { autoplay } = useUserSettings()
 
@@ -85,8 +87,45 @@ function sheetRating() {
 function playEpisode(ep) {
   const show = tvSheetShow.value
   if (!show || selectedSeason.value == null) return
-  setTvNextHandler(playNextEpisode)
-  onPlayEpisode(show, selectedSeason.value, ep.episodeNumber, ep)
+  setTvNextHandler(playNextEpisode, show.id)
+  return onPlayEpisode(show, selectedSeason.value, ep.episodeNumber, ep)
+}
+
+function episodeQueueItem(ep) {
+  const show = tvSheetShow.value
+  const season = selectedSeason.value
+  if (!show || season == null) return null
+  return {
+    kind: 'tv',
+    externalId: String(show?.id ?? ''),
+    title: `${show?.title ?? 'TV Show'} – S${season}E${ep.episodeNumber}${ep.title ? ` · ${ep.title}` : ''}`,
+    overview: ep.overview ?? show?.overview ?? '',
+    artworkUrl: ep.stillUrl ?? show?.posterUrl ?? null,
+    sourceKey: show.sourceKey ?? defaultSourceKey.value,
+    isEpisode: true,
+    show: { ...show, sourceKey: show.sourceKey ?? defaultSourceKey.value },
+    season,
+    episode: ep.episodeNumber,
+    episodeInfo: ep,
+  }
+}
+
+function episodeActionContext(ep) {
+  const show = tvSheetShow.value
+  const localItem = localItemFor(show?.id)
+  return {
+    catalogItemId: localItem?.id ?? null,
+    catalogTypeId: localItem?.catalogTypeId ?? null,
+    kind: 'Tv',
+    externalId: String(show?.id ?? ''),
+    title: `${show?.title ?? 'TV Show'} – S${selectedSeason.value}E${ep.episodeNumber}${ep.title ? ` · ${ep.title}` : ''}`,
+    imageUrl: ep.stillUrl ?? tvSheetDetails.value?.posterUrl ?? show?.posterUrl,
+    backdropUrl: tvSheetDetails.value?.backdropUrl ?? show?.backdropUrl,
+    overview: ep.overview ?? show?.overview,
+    year: Number(ep.airDate?.slice?.(0, 4) ?? tvSheetDetails.value?.year ?? show?.year) || null,
+    season: selectedSeason.value,
+    episode: ep.episodeNumber,
+  }
 }
 
 // When autoplay is on, advance to the following episode at the end of the playout:
@@ -188,20 +227,6 @@ onBeforeUnmount(() => setTvNextHandler(null))
 
           <template v-else-if="tvSheetDetails">
             <div class="sheet-overview">{{ tvSheetDetails.overview || 'No description available.' }}</div>
-            <PluginActionButtons
-              surface="DetailScreen"
-              kind="tv"
-              :context="{
-                kind: 'Tv', catalogItemId: localItemFor(tvSheetShow.id)?.id ?? null,
-                catalogTypeId: localItemFor(tvSheetShow.id)?.catalogTypeId ?? null,
-                externalId: String(tvSheetShow.id), title: sheetTitle(),
-                imageUrl: tvSheetDetails.posterUrl ?? tvSheetShow.posterUrl,
-                backdropUrl: tvSheetDetails.backdropUrl ?? tvSheetShow.backdropUrl,
-                overview: tvSheetDetails.overview ?? tvSheetShow.overview,
-                year: Number(tvSheetDetails.year ?? tvSheetShow.year) || null,
-              }"
-            />
-
             <div v-if="tvSheetDetails.cast?.length" class="sheet-section">
               <div class="sheet-section-title">Cast</div>
               <div class="sheet-cast-row">
@@ -282,6 +307,15 @@ onBeforeUnmount(() => setTvNextHandler(null))
                       </div>
                       <div v-if="ep.overview" class="tv-episode-overview">{{ ep.overview }}</div>
                     </div>
+                    <MediaDetailsActions
+                      class="tv-episode-actions"
+                      compact
+                      kind="tv"
+                      :item="ep"
+                      :queue-item="episodeQueueItem(ep)"
+                      :play-handler="() => playEpisode(ep)"
+                      :action-context="episodeActionContext(ep)"
+                    />
                     <div v-if="ep.voteAverage" class="tv-episode-rating">
                       <q-icon name="star" color="secondary" size="14px" />
                       {{ ep.voteAverage.toFixed(1) }}

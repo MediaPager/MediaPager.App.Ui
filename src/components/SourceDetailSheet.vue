@@ -3,17 +3,17 @@ import { computed, ref, watch } from 'vue'
 import { useSources } from '../composables/useSources'
 import { useCatalogItems } from '../composables/useCatalogItems'
 import { formatPluginError } from '../composables/pluginErrors'
-import PluginActionButtons from './PluginActionButtons.vue'
+import MediaDetailsActions from './MediaDetailsActions.vue'
 
 // Generic data-driven detail sheet for a stream-provider title: fetches
-// GET /sources/{key}/details/{externalId} and renders whatever the provider returned
-// (overview, rating, credits, seasons/episodes for TV-kind sources). Playback resolve
-// (/sources/{key}/resolve) is a later phase — for now this is the browse target.
+// GET /sources/{key}/details/{externalId}, shows provider metadata, and exposes the
+// common play/queue/playlist actions for any provider-backed media kind.
 const open = defineModel({ type: Boolean, required: true })
 const props = defineProps({
   sourceKey: { type: String, required: true },
   externalId: { type: String, default: null },
   kind: { type: String, default: null },
+  initialItem: { type: Object, default: null },
 })
 
 const { fetchDetails, sourceTabs } = useSources()
@@ -22,12 +22,33 @@ const sourceLabel = computed(() =>
   localItemFor(props.externalId)?.catalogName ??
   sourceTabs.value.find((source) => source.sourceKey === props.sourceKey)?.label ??
   'Stream')
+const mediaKind = computed(() => props.kind ?? props.initialItem?.kind ?? 'music')
+const queueItem = computed(() => details.value ? {
+  ...props.initialItem,
+  ...details.value,
+  kind: mediaKind.value,
+  sourceKey: props.sourceKey,
+  externalId: String(details.value.externalId ?? props.externalId ?? ''),
+} : null)
+const actionContext = computed(() => details.value ? {
+  catalogItemId: localItemFor(props.externalId)?.id ?? null,
+  catalogTypeId: localItemFor(props.externalId)?.catalogTypeId ?? null,
+  kind: mediaKind.value === 'tv' ? 'Tv' : mediaKind.value === 'movie' ? 'Movie' : mediaKind.value,
+  sourceKey: props.sourceKey,
+  externalId: String(details.value.externalId ?? props.externalId ?? ''),
+  title: details.value.title,
+  imageUrl: details.value.artworkUrl,
+  backdropUrl: details.value.backdropUrl,
+  overview: details.value.overview,
+  year: details.value.year,
+  metadata: details.value.metadata,
+} : null)
 
 const details = ref(null)
 const loading = ref(false)
 const error = ref('')
 
-watch([open, () => props.externalId], async ([isOpen, id]) => {
+watch([open, () => props.externalId, () => props.sourceKey], async ([isOpen, id]) => {
   if (!isOpen || !id) return
   details.value = null
   error.value = ''
@@ -94,17 +115,26 @@ watch([open, () => props.externalId], async ([isOpen, id]) => {
             </div>
 
             <div v-if="details.overview" class="sheet-overview">{{ details.overview }}</div>
-            <PluginActionButtons
-              surface="DetailScreen"
-                :kind="kind"
-                :context="{
-                catalogItemId: localItemFor(externalId)?.id ?? null,
-                catalogTypeId: localItemFor(externalId)?.catalogTypeId ?? null,
-                kind: kind === 'tv' ? 'Tv' : kind === 'movie' ? 'Movie' : kind,
-                sourceKey, externalId: details.externalId, title: details.title,
-                imageUrl: details.artworkUrl, backdropUrl: details.backdropUrl,
-                overview: details.overview, year: details.year,
-              }"
+            <div v-if="details.metadata?.length" class="sheet-section">
+              <div class="row q-gutter-sm">
+                <q-chip
+                  v-for="field in details.metadata"
+                  :key="`${field.label}:${field.value}`"
+                  outline
+                  color="primary"
+                  text-color="grey-4"
+                  dense
+                >
+                  <span class="text-weight-medium q-mr-xs">{{ field.label }}:</span>{{ field.value }}
+                </q-chip>
+              </div>
+            </div>
+            <MediaDetailsActions
+              :kind="mediaKind"
+              :item="details"
+              :queue-item="queueItem"
+              :source-key="sourceKey"
+              :action-context="actionContext"
             />
 
             <div v-if="details.credits?.length" class="sheet-section">

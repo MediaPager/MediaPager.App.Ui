@@ -64,6 +64,20 @@ export function useCatalogItems() {
     return localItem
   }
 
+  async function findLocalItemById(id) {
+    if (id == null) return null
+    const cached = items.value.find((item) => String(item.id) === String(id))
+      ?? Object.values(localByExternalId.value).find((item) => String(item.id) === String(id))
+    if (cached?.storagePath) return cached
+    try {
+      const { data } = await api.get(`/catalog-items/${encodeURIComponent(id)}`)
+      if (data?.storagePath) syncLocalMap(data)
+      return data?.storagePath ? data : null
+    } catch {
+      return null
+    }
+  }
+
   async function requestEditItem(id) {
     const { data } = await api.get(`/catalog-items/${encodeURIComponent(id)}`)
     editItemRequest.value = data
@@ -158,6 +172,7 @@ export function useCatalogItems() {
     refreshLocalMap,
     localItemFor,
     findLocalItemByExternalId,
+    findLocalItemById,
     requestEditItem,
     clearEditItemRequest,
     updateItem,

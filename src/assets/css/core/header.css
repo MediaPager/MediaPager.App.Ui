@@ -124,6 +124,11 @@
   flex: none;
 }
 
+.typeahead-actions {
+  flex: none;
+  margin-left: auto;
+}
+
 .typeahead-empty {
   color: #94a3b8;
   font-size: 0.82rem;

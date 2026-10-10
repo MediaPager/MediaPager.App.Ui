@@ -15,6 +15,8 @@ import AuthPage from './components/AuthPage.vue'
 import AppHeader from './components/AppHeader.vue'
 import VideoPlayerDialog from './components/VideoPlayerDialog.vue'
 import PluginActivityDrawer from './components/PluginActivityDrawer.vue'
+import PlaylistDrawer from './components/PlaylistDrawer.vue'
+import MediaDetails from './components/MediaDetails.vue'
 
 const router = useRouter()
 const { accessToken, isSuperAdmin, signOut } = useAuth()
@@ -22,7 +24,7 @@ const { fetchMovies, clearList } = useMovies()
 const { clearTvList } = useTvShows()
 const { streamTab } = useStreamTabs()
 const { loadSettings } = useSettings()
-const { playLoading, cueStyle } = usePlayback()
+const { playLoading, playerOpen, cueStyle } = usePlayback()
 const { refreshActivity } = usePluginActivity()
 const { fetchCatalogs, fetchNavCatalogs } = useCatalogs()
 const { loadUserSettings } = useUserSettings()
@@ -42,6 +44,7 @@ function onLoggedIn() {
 }
 
 function onSignOut() {
+  playerOpen.value = false
   signOut()
   streamTab.value = 'movies'
   clearList()
@@ -100,6 +103,8 @@ onMounted(() => {
 
     <VideoPlayerDialog />
     <PluginActivityDrawer />
+    <PlaylistDrawer />
+    <MediaDetails v-if="accessToken" />
 
     <component :is="'style'">{{ cueStyle }}</component>
   </q-layout>

@@ -3,11 +3,16 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { useMovies } from '../composables/useMovies'
+import { usePlayback } from '../composables/usePlayback'
+import { useMediaDetails } from '../composables/useMediaDetails'
 import { useTvShows } from '../composables/useTvShows'
 import { useStreamTabs } from '../composables/useStreamTabs'
+import { useSources } from '../composables/useSources'
 import { usePluginActivity } from '../composables/usePluginActivity'
 import { useSettings } from '../composables/useSettings'
 import { useCatalogs } from '../composables/useCatalogs'
+import { usePlaylist } from '../composables/usePlaylist'
+import { Notify } from 'quasar'
 import { api } from '../composables/useApi'
 import ChangePasswordDialog from './ChangePasswordDialog.vue'
 import appIcon from '../assets/images/icon.png'
@@ -27,17 +32,29 @@ const settingsOpen = computed(() => route.name === 'settings')
 
 const { currentUserEmail, userScopes, userInitial, isSuperAdmin } = useAuth()
 const { query, search, openDetails } = useMovies()
+const { onPlay, onPlaySourceItem } = usePlayback()
+const { playlistDrawerOpen, queue, addToQueue } = usePlaylist()
+const { openSourceDetails } = useMediaDetails()
 const { tvQuery, searchTv, openTvDetails } = useTvShows()
-const { streamTab } = useStreamTabs()
+const { streamTab, activeMediaKind, sourceTabs, isSourceTab } = useStreamTabs()
+const { searchSource } = useSources()
 const { activityDrawerOpen, activityCount } = usePluginActivity()
 const { settingsAttentionNeeded, loadSettings } = useSettings()
 const { navCatalogs, fetchNavCatalogs } = useCatalogs()
 
 // One unified search box, the same on every tab: it type-aheads across all media
-// categories (movies & TV have data today; podcasts/audiobooks/books/music are
-// future kinds). Pressing Enter jumps to the active tab's grid search.
+// categories. Provider-backed kinds can be selected and played directly from the results.
 const searchText = ref('')
 const isTvSearch = computed(() => streamTab.value === 'tv')
+const activeSourceKey = computed(() => {
+  if (isSourceTab(streamTab.value)) {
+    return sourceTabs.value.find((source) => `source:${source.sourceKey}` === streamTab.value)?.sourceKey ?? null
+  }
+  if (activeMediaKind.value === 'music') {
+    return sourceTabs.value.find((source) => String(source.kind ?? '').toLowerCase() === 'music')?.sourceKey ?? null
+  }
+  return null
+})
 const searchPlaceholder = 'search movies, TV, music, books…'
 
 // Debounced type-ahead. The dropdown is a plain fixed-position popup positioned
@@ -163,6 +180,39 @@ function catalogNameForHit(hit) {
   return navCatalogs.value.find((catalog) => catalog.id === hit.catalogId)?.name ?? 'Local library'
 }
 
+function metadataSummary(metadata) {
+  return (metadata ?? []).slice(0, 3).map((field) => field.value).filter(Boolean).join(' · ')
+}
+
+function searchQueueItem(hit) {
+  return {
+    ...hit,
+    id: hit.catalogItemId ?? hit.id,
+    externalId: String(hit.externalId ?? hit.id),
+    catalogItemId: hit.catalogItemId ?? null,
+    kind: hit.kind,
+    sourceKey: hit.sourceKey ?? null,
+    artworkUrl: hit.artworkUrl ?? null,
+  }
+}
+
+function playSearchHit(hit) {
+  closeTypeahead()
+  const item = searchQueueItem(hit)
+  return item.sourceKey
+    ? onPlaySourceItem(item, item.sourceKey)
+    : onPlay(item)
+}
+
+function queueSearchHit(hit) {
+  if (!addToQueue(searchQueueItem(hit))) return
+  Notify.create({ type: 'positive', message: 'Added to the queue.' })
+}
+
+function togglePlaylistDrawer() {
+  playlistDrawerOpen.value = !playlistDrawerOpen.value
+}
+
 // Local hits route to the exact catalog copy. Stream hits first select the matching
 // media tab, then open the usual movie/TV detail sheet.
 async function pickSearchResult(hit) {
@@ -188,6 +238,19 @@ async function pickSearchResult(hit) {
   const tab = tabByKind[hit.kind]
   if (tab) await router.push({ name: 'stream', params: { tab } })
 
+  if (hit.kind === 'music') {
+    openSourceDetails(hit.sourceKey, {
+      kind: hit.kind,
+      externalId: hit.externalId,
+      title: hit.title,
+      year: hit.year,
+      overview: hit.overview,
+      artworkUrl: hit.artworkUrl,
+      metadata: hit.metadata,
+    })
+    return
+  }
+
   const base = {
     id: hit.id,
     title: hit.title,
@@ -204,7 +267,9 @@ async function pickSearchResult(hit) {
 function doSearch() {
   closeTypeahead()
   const text = searchText.value.trim()
-  if (isTvSearch.value) {
+  if (activeSourceKey.value) {
+    searchSource(activeSourceKey.value, text)
+  } else if (isTvSearch.value) {
     tvQuery.value = text
     searchTv()
   } else {
@@ -264,6 +329,19 @@ function openProfile() {
           <q-btn flat round dense icon="search" color="primary" @click="doSearch" />
         </template>
       </q-input>
+      <q-btn
+        v-if="!settingsOpen"
+        flat
+        round
+        dense
+        icon="queue_music"
+        aria-label="Open queue and playlists"
+        title="Queue and playlists"
+        class="q-ml-sm"
+        @click="togglePlaylistDrawer"
+      >
+        <q-badge v-if="queue.length" color="primary" text-color="dark" floating>{{ queue.length }}</q-badge>
+      </q-btn>
       <q-space />
       <q-btn
         flat
@@ -349,6 +427,17 @@ function openProfile() {
           <q-btn flat round dense icon="search" color="primary" @click="doSearch" />
         </template>
       </q-input>
+      <q-btn
+        flat
+        round
+        dense
+        icon="queue_music"
+        aria-label="Open queue and playlists"
+        title="Queue and playlists"
+        @click="togglePlaylistDrawer"
+      >
+        <q-badge v-if="queue.length" color="primary" text-color="dark" floating>{{ queue.length }}</q-badge>
+      </q-btn>
     </q-toolbar>
 
     <!-- type-ahead dropdown; fixed-position, anchored to whichever search input has focus -->
@@ -369,7 +458,7 @@ function openProfile() {
         <template v-else-if="typeaheadResults.length">
           <div
             v-for="hit in typeaheadResults"
-            :key="`${hit.kind}-${hit.id}`"
+            :key="`${hit.kind}-${hit.sourceKey}-${hit.externalId ?? hit.id}`"
             class="typeahead-item"
             role="button"
             tabindex="0"
@@ -387,7 +476,10 @@ function openProfile() {
             </div>
             <div class="typeahead-item-text">
               <div class="typeahead-title">{{ hit.title }}</div>
-              <div class="typeahead-year">
+              <div v-if="metadataSummary(hit.metadata)" class="typeahead-year">
+                {{ metadataSummary(hit.metadata) }}
+              </div>
+              <div v-if="hit.year || hit.catalogId != null" class="typeahead-year">
                 {{ hit.year ?? '—' }}
                 <span v-if="hit.catalogId != null"> · {{ catalogNameForHit(hit) }}</span>
               </div>
@@ -399,6 +491,28 @@ function openProfile() {
               :label="kindMeta[hit.kind]?.label ?? hit.kind"
               class="typeahead-badge"
             />
+            <div class="typeahead-actions row items-center no-wrap">
+              <q-btn
+                flat
+                round
+                dense
+                size="sm"
+                icon="play_arrow"
+                aria-label="Play now"
+                title="Play now"
+                @click.stop="playSearchHit(hit)"
+              />
+              <q-btn
+                flat
+                round
+                dense
+                size="sm"
+                icon="playlist_add"
+                aria-label="Add to queue"
+                title="Add to queue"
+                @click.stop="queueSearchHit(hit)"
+              />
+            </div>
           </div>
         </template>
         <div v-else role="button" tabindex="0" class="typeahead-empty" @click="doSearch" @keydown.enter.prevent="doSearch">

@@ -74,9 +74,16 @@ export function useSources() {
       (plugin.capabilities ?? []).includes('stream') &&
       (plugin.streamMode ?? 'online') === 'online'))
 
-  // Playback of catalog titles resolves through whichever stream provider is installed —
-  // the host never hardcodes one. With several installed, the first source is the default.
-  const defaultSourceKey = computed(() => sources.value[0]?.key ?? null)
+  // Movies and TV resolve through a provider that serves video where possible. A
+  // music-only provider may sort first, so don't accidentally route video into it.
+  const defaultSourceKey = computed(() => {
+    const kindOf = (source) => String(source.kind ?? '').toLowerCase()
+    return sources.value.find((source) => ['movie', 'movies'].includes(kindOf(source)))?.key
+      ?? sources.value.find((source) => ['tv', 'tvshow', 'tv-show'].includes(kindOf(source)))?.key
+      ?? sources.value.find((source) => !['music', 'podcast', 'audiobook', 'book'].includes(kindOf(source)))?.key
+      ?? sources.value[0]?.key
+      ?? null
+  })
 
   function stateFor(sourceKey) {
     if (!browseState.value[sourceKey]) {
@@ -88,6 +95,7 @@ export function useSources() {
         loading: false,
         error: '',
         loaded: false,
+        requestId: 0,
       }
     }
     return browseState.value[sourceKey]
@@ -95,26 +103,30 @@ export function useSources() {
 
   async function fetchBrowse(sourceKey, page = 1) {
     const state = stateFor(sourceKey)
+    const requestId = ++state.requestId
     state.loading = true
     state.error = ''
     try {
       const { data } = await api.get(`/sources/${encodeURIComponent(sourceKey)}/browse`, {
         params: { query: state.query || undefined, page },
       })
+      if (requestId !== state.requestId) return
       state.items = data?.items ?? []
       state.page = data?.page ?? page
       state.totalPages = data?.totalPages ?? 1
       state.loaded = true
     } catch (requestError) {
+      if (requestId !== state.requestId) return
       state.error = formatPluginError(requestError, 'Could not load this source.')
     } finally {
-      state.loading = false
+      if (requestId === state.requestId) state.loading = false
     }
   }
 
   function searchSource(sourceKey, query) {
     const state = stateFor(sourceKey)
-    state.query = query
+    state.query = String(query ?? '').trim()
+    state.page = 1
     return fetchBrowse(sourceKey, 1)
   }
 

@@ -5,7 +5,7 @@ import { usePlayback } from '../composables/usePlayback'
 import { useCatalogItems } from '../composables/useCatalogItems'
 import { useSources } from '../composables/useSources'
 import ItemRatingMenu from './ItemRatingMenu.vue'
-import PluginActionButtons from './PluginActionButtons.vue'
+import MediaDetailsActions from './MediaDetailsActions.vue'
 
 const {
   movieSheetOpen,
@@ -26,6 +26,32 @@ const sourceLabel = computed(() => {
   if (localItem.value) return localItem.value.catalogName || 'Local catalog'
   return sourceTabs.value.find((source) => source.sourceKey === defaultSourceKey.value)?.label ?? 'Stream'
 })
+
+const queueItem = computed(() => ({
+  ...sheetMovie.value,
+  id: localItem.value?.id ?? sheetMovie.value?.id,
+  externalId: String(localItem.value?.externalId ?? sheetMovie.value?.externalId ?? sheetMovie.value?.id ?? ''),
+  kind: 'movie',
+  sourceKey: defaultSourceKey.value,
+  catalogItemId: localItem.value?.id ?? null,
+  localItem: localItem.value,
+}))
+
+const actionContext = computed(() => ({
+  catalogItemId: localItem.value?.id ?? null,
+  catalogTypeId: localItem.value?.catalogTypeId ?? null,
+  kind: 'Movie',
+  externalId: String(sheetMovie.value?.externalId ?? sheetMovie.value?.id ?? ''),
+  title: sheetDetails.value?.title ?? sheetMovie.value?.title,
+  imageUrl: sheetDetails.value?.posterUrl ?? sheetMovie.value?.posterUrl,
+  backdropUrl: sheetDetails.value?.backdropUrl ?? sheetMovie.value?.backdropUrl,
+  overview: sheetDetails.value?.overview ?? sheetMovie.value?.overview,
+  year: Number(sheetDetails.value?.year ?? sheetMovie.value?.year) || null,
+}))
+
+function playCurrentMovie() {
+  return onPlay(localItem.value ?? sheetMovie.value)
+}
 
 </script>
 
@@ -86,16 +112,6 @@ const sourceLabel = computed(() => {
               </div>
               <!-- desktop: play sits right of the title/meta/genres -->
               <div class="sheet-header-actions">
-                <q-btn
-                  unelevated
-                  color="primary"
-                  text-color="dark"
-                  icon="play_arrow"
-                  label="Play"
-                  size="lg"
-                  class="sheet-play-float"
-                  @click="onPlay(localItem ?? sheetMovie)"
-                />
                 <template v-if="localItem">
                   <item-rating-menu v-if="!isTouchDevice" :item="localItem" size="md" />
                 </template>
@@ -103,31 +119,13 @@ const sourceLabel = computed(() => {
             </div>
           </div>
 
-          <template v-if="localItem">
-            <div class="sheet-actions-mobile row q-gutter-sm items-center">
-              <q-btn
-                unelevated
-                color="primary"
-                text-color="dark"
-                icon="play_arrow"
-                label="Play"
-                class="col"
-                @click="onPlay(localItem ?? sheetMovie)"
-              />
-              <item-rating-menu v-if="!isTouchDevice" :item="localItem" size="sm" />
-            </div>
-          </template>
-          <div v-else class="sheet-actions row q-gutter-sm">
-            <q-btn
-              unelevated
-              color="primary"
-              text-color="dark"
-              icon="play_arrow"
-              label="Play"
-              class="col"
-              @click="onPlay(localItem ?? sheetMovie)"
-            />
-          </div>
+          <MediaDetailsActions
+            kind="movie"
+            :item="sheetMovie"
+            :queue-item="queueItem"
+            :play-handler="playCurrentMovie"
+            :action-context="actionContext"
+          />
 
           <div v-if="sheetLoading" class="flex flex-center q-pa-md">
             <q-spinner-dots color="primary" size="2rem" />
@@ -135,21 +133,6 @@ const sourceLabel = computed(() => {
 
           <template v-else-if="sheetDetails">
             <div class="sheet-overview">{{ sheetDetails.overview || 'No description available.' }}</div>
-            <PluginActionButtons
-              surface="DetailScreen"
-              kind="movie"
-              :context="{
-                catalogItemId: localItem?.id ?? null,
-                kind: 'Movie',
-                externalId: String(sheetMovie.id),
-                title: sheetDetails.title ?? sheetMovie.title,
-                imageUrl: sheetDetails.posterUrl ?? sheetMovie.posterUrl,
-                backdropUrl: sheetDetails.backdropUrl ?? sheetMovie.backdropUrl,
-                overview: sheetDetails.overview ?? sheetMovie.overview,
-                year: Number(sheetDetails.year ?? sheetMovie.year) || null,
-              }"
-            />
-
             <div v-if="sheetDetails.cast?.length" class="sheet-section">
               <div class="sheet-section-title">Cast</div>
               <div class="sheet-cast-row">

@@ -1,4 +1,4 @@
-/* ── Video player dialog ─────────────────────────────────────────────────── */
+/* ── Persistent full-size / mini player ──────────────────────────────────── */
 
 .play-loading {
   position: fixed;
@@ -11,16 +11,29 @@
   flex-direction: column;
 }
 
-.player-card {
-  background: #080c16;
-  width: 80vw;
-  height: 80vh;
-  max-width: none;
-  max-height: none;
+.player-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 7000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.q-dialog__inner--minimized > .player-card {
+.player-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+}
+
+.player-card {
+  position: relative;
+  background: #080c16;
+  width: min(96vw, 1320px);
+  height: min(90vh, 900px);
   max-width: none;
+  max-height: none;
+  overflow: hidden;
 }
 
 .player-bar {
@@ -29,9 +42,197 @@
   height: 40px;
 }
 
+.player-title {
+  min-width: 0;
+}
+
+.player-content {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .player-wrap {
   background: #000;
   position: relative;
   min-width: 0;
   min-height: 0;
+}
+
+.player-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #000;
+}
+
+.player-stage > .video-js {
+  width: 100%;
+  height: 100%;
+}
+
+.player-shell--music .player-stage > .video-js {
+  position: absolute;
+  z-index: -1;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.music-artwork-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  overflow: hidden;
+  padding: 1rem;
+  background: radial-gradient(ellipse at center, #1c2940 0%, #080c16 68%);
+}
+
+.music-artwork {
+  width: min(48vh, 440px);
+  height: min(48vh, 440px);
+  border-radius: 0.8rem;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.55);
+}
+
+.music-artwork-fallback {
+  width: 100%;
+  height: 100%;
+  color: #86d411;
+  background: #121b2b;
+}
+
+.music-artwork-title {
+  max-width: min(80vw, 32rem);
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.music-artwork-subtitle {
+  max-width: min(80vw, 32rem);
+  text-align: center;
+}
+
+.music-player-controls {
+  flex: none;
+  background: #0e1525;
+  border-top: 1px solid #1a2333;
+}
+
+.music-seek,
+.player-mini-seek {
+  min-width: 0;
+}
+
+.player-shell--mini {
+  inset: auto 1.25rem 1.25rem auto;
+  z-index: 8000;
+  width: min(430px, calc(100vw - 2rem));
+  height: auto;
+  display: block;
+  pointer-events: none;
+}
+
+.player-shell--mini .player-card {
+  width: 100%;
+  height: auto;
+  max-height: 340px;
+  pointer-events: auto;
+  border: 1px solid #28364d;
+  box-shadow: 0 12px 42px rgba(0, 0, 0, 0.6);
+}
+
+.player-shell--mini .player-stage {
+  flex: none;
+  height: 210px;
+}
+
+.player-mini-controls {
+  min-height: 46px;
+  background: #0e1525;
+  border-top: 1px solid #1a2333;
+}
+
+.player-mini-time {
+  flex: none;
+  color: #94a3b8;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.player-shell--mini.player-shell--music .player-stage {
+  height: 112px;
+}
+
+.player-shell--mini.player-shell--music .music-artwork-panel {
+  align-items: flex-start;
+  justify-content: center;
+  padding-left: 110px;
+  gap: 0.25rem;
+  background: linear-gradient(90deg, #111a2a, #080c16);
+}
+
+.player-shell--mini.player-shell--music .music-artwork {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  width: 88px;
+  height: 88px;
+  border-radius: 0.4rem;
+}
+
+.player-shell--mini.player-shell--music .music-artwork-title,
+.player-shell--mini.player-shell--music .music-artwork-subtitle {
+  max-width: calc(100% - 110px);
+  text-align: left;
+}
+
+.player-shell--mini.player-shell--music .music-artwork-title {
+  font-size: 0.9rem;
+}
+
+.player-shell--mini.player-shell--music .music-artwork-fallback {
+  font-size: 0.75rem;
+}
+
+.playback-error {
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 5;
+  background: rgba(18, 27, 43, 0.96);
+}
+
+@media (max-width: 700px) {
+  .player-shell:not(.player-shell--mini) .player-card {
+    width: 100vw;
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  .player-shell--mini {
+    right: 0.5rem;
+    bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    width: min(430px, calc(100vw - 1rem));
+  }
+
+  .player-shell--mini .player-stage {
+    height: 180px;
+  }
+
+  .player-shell--mini.player-shell--music .player-stage {
+    height: 105px;
+  }
+
+  .music-artwork {
+    width: min(42vh, 300px);
+    height: min(42vh, 300px);
+  }
 }

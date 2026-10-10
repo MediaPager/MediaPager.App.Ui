@@ -1,9 +1,10 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useSources } from '../composables/useSources'
 import { useMovies } from '../composables/useMovies'
 import { useCatalogItems } from '../composables/useCatalogItems'
-import SourceDetailSheet from './SourceDetailSheet.vue'
+import { usePlayback } from '../composables/usePlayback'
+import { useMediaDetails } from '../composables/useMediaDetails'
 import PluginActionButtons from './PluginActionButtons.vue'
 
 // Generic data-driven browse screen for one stream-provider source (`source:{key}` tab):
@@ -17,6 +18,8 @@ const props = defineProps({
 const { stateFor, fetchBrowse } = useSources()
 const { isTouchDevice } = useMovies()
 const { localItemFor } = useCatalogItems()
+const { onPlaySourceItem } = usePlayback()
+const { openSourceDetails } = useMediaDetails()
 
 const state = computed(() => stateFor(props.sourceKey))
 
@@ -25,13 +28,16 @@ watch(() => props.sourceKey, (key) => {
   if (key && !stateFor(key).loaded && !stateFor(key).loading) fetchBrowse(key)
 }, { immediate: true })
 
-const detailOpen = ref(false)
-const detailLoading = ref(false)
-const detailExternalId = ref(null)
-
 function openDetails(item) {
-  detailExternalId.value = item.externalId
-  detailOpen.value = true
+  openSourceDetails(props.sourceKey, item)
+}
+
+function playItem(item) {
+  return onPlaySourceItem({ ...item, kind: item.kind ?? props.kind ?? 'music' }, props.sourceKey)
+}
+
+function metadataSummary(metadata) {
+  return (metadata ?? []).slice(0, 3).map((field) => field.value).filter(Boolean).join(' · ')
 }
 
 function goToPage(page) {
@@ -59,6 +65,17 @@ function goToPage(page) {
                 </div>
               </template>
             </q-img>
+            <q-btn
+              round
+              unelevated
+              color="dark"
+              text-color="primary"
+              icon="info"
+              size="sm"
+              class="poster-info-button"
+              :aria-label="`Browse ${item.title}`"
+              @click.stop="openDetails(item)"
+            />
             <div v-if="item.voteAverage != null" class="rating absolute-bottom-right q-ma-xs">
               <q-icon name="star" color="secondary" size="16px" />
               {{ item.voteAverage.toFixed(1) }}
@@ -72,7 +89,7 @@ function goToPage(page) {
                 kind: kind === 'tv' ? 'Tv' : kind === 'movie' ? 'Movie' : kind,
                 sourceKey, externalId: item.externalId, title: item.title,
                 imageUrl: item.artworkUrl, backdropUrl: item.backdropUrl,
-                overview: item.overview, year: item.year,
+                overview: item.overview, year: item.year, metadata: item.metadata,
               }"
             />
             <div class="play-overlay absolute-full flex flex-center">
@@ -81,10 +98,10 @@ function goToPage(page) {
                 unelevated
                 color="primary"
                 text-color="dark"
-                icon="info"
+                icon="play_arrow"
                 size="lg"
-                :aria-label="`Browse ${item.title}`"
-                @click.stop="openDetails(item)"
+                :aria-label="`Play ${item.title}`"
+                @click.stop="playItem(item)"
               />
               <div class="movie-overview">
                 {{ item.overview || 'No description available.' }}
@@ -94,7 +111,10 @@ function goToPage(page) {
 
           <q-card-section class="col q-pa-sm">
             <div class="movie-title">{{ item.title }}</div>
-            <div class="movie-year text-primary">{{ item.year ?? '—' }}</div>
+            <div v-if="metadataSummary(item.metadata)" class="movie-year text-grey-6">
+              {{ metadataSummary(item.metadata) }}
+            </div>
+            <div v-else class="movie-year text-primary">{{ item.year ?? '—' }}</div>
           </q-card-section>
         </q-card>
       </div>
@@ -124,11 +144,5 @@ function goToPage(page) {
       />
     </div>
 
-    <SourceDetailSheet
-      v-model="detailOpen"
-      :source-key="sourceKey"
-      :external-id="detailExternalId"
-      :kind="kind"
-    />
   </div>
 </template>

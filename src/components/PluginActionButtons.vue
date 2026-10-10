@@ -44,6 +44,7 @@ const declaredActions = computed(() => plugins.value.flatMap((plugin) =>
     .filter((action) => action.surface?.toLowerCase() === props.surface.toLowerCase())
     .filter((action) => !action.kinds?.length || !props.kind ||
       action.kinds.some((kind) => kind.toLowerCase() === normalizeKind(props.kind)))
+    .filter((action) => action.enabled !== false)
     .filter((action) => action.scope?.toLowerCase() !== 'streamitem' || props.context.catalogItemId == null)
     .filter((action) => action.scope?.toLowerCase() !== 'libraryitem' || props.context.catalogItemId != null)
     .filter((action) => action.hostActionId !== EDIT_CATALOG_ITEM || canEditCatalogs.value)

@@ -1,4 +1,4 @@
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import videojs from 'video.js'
 import '@videojs/http-streaming'
 import 'video.js/dist/video-js.css'
@@ -7,22 +7,31 @@ import { useMovies } from './useMovies'
 import { useSources } from './useSources'
 import { useCatalogItems } from './useCatalogItems'
 import { formatPluginError } from './pluginErrors'
+import { usePlaylist } from './usePlaylist'
+import { useUserSettings } from './useUserSettings'
 
 // Player + subtitles share the single video.js player instance, so they live in
 // one composable. State is module-level so the player dialog and any triggers stay in sync.
 
 const playLoading = ref(false)
 const playerOpen = ref(false)
+const playerMinimized = ref(false)
 const currentMovie = ref(null)
+const playbackError = ref('')
 const streamUrl = ref('')
-const streamType = ref('hls') // 'hls' via the proxy, or 'mp4' from a local library file
+const streamType = ref('application/vnd.apple.mpegurl')
 const playingLocal = ref(false)
 const videoEl = ref(null)
+const playerPaused = ref(true)
+const playbackCurrentTime = ref(0)
+const playbackDuration = ref(0)
 let player = null
+let retryCurrentPlayback = null
 
 // Set by the TV detail sheet while an episode plays: called when the video ends so
 // the next episode (if any) can start automatically when autoplay is enabled.
 const tvNextHandler = ref(null)
+const tvNextShowId = ref(null)
 
 const subtitles = ref([])
 const subsLoading = ref(false)
@@ -93,14 +102,16 @@ watch(subtitleStyle, (value) => {
 export function usePlayback() {
   const { error, isTouchDevice } = useMovies()
   const { loaded: sourcesLoaded, fetchSources, defaultSourceKey } = useSources()
-  const { localItemFor, findLocalItemByExternalId } = useCatalogItems()
+  const { localItemFor, findLocalItemByExternalId, findLocalItemById } = useCatalogItems()
+  const { autoplay } = useUserSettings()
+  const playlist = usePlaylist()
 
-  // Resolve a title to a proxied HLS URL through the installed stream provider.
-  // Which provider that is depends entirely on what the host has loaded — the UI
-  // never names one. Throws when no provider is installed or it can't resolve.
-  async function resolveProviderStream(externalId, { season = null, episode = null } = {}) {
+  // Resolve a title to a proxied media URL through the selected stream provider.
+  // Which provider that is depends entirely on the source key supplied by the caller
+  // or the first loaded source — the UI does not hard-code provider implementations.
+  async function resolveProviderStream(externalId, { season = null, episode = null, sourceKey: requestedSourceKey = null } = {}) {
     if (!sourcesLoaded.value) await fetchSources()
-    const sourceKey = defaultSourceKey.value
+    const sourceKey = requestedSourceKey ?? defaultSourceKey.value
     if (!sourceKey) {
       throw new Error('No stream provider is installed, so there is nothing to play from.')
     }
@@ -111,7 +122,13 @@ export function usePlayback() {
       { params })
     // The stream must come from the API origin; the UI host would otherwise
     // serve the SPA's index.html for this path and the player can't parse it.
-    return new URL(`/stream/${data.streamId}/root`, apiOrigin()).toString()
+    return {
+      url: data.directPlayback
+        ? data.streamUrl
+        : new URL(`/stream/${data.streamId}/root`, apiOrigin()).toString(),
+      contentType: data.contentType ?? 'application/vnd.apple.mpegurl',
+      directPlayback: data.directPlayback === true,
+    }
   }
 
   // Provider round-trips (and autoplay-next) can resolve in a single quick round
@@ -133,27 +150,47 @@ export function usePlayback() {
     }, MIN_PLAY_LOADING_MS)
   }
 
-  async function onPlay(movie) {
+  async function onPlay(movie, { preserveQueue = false } = {}) {
     beginPlayLoading()
     error.value = ''
+    playbackError.value = ''
+    retryCurrentPlayback = () => onPlay(movie, { preserveQueue: true })
     try {
       const externalId = movie.externalId ? String(movie.externalId) : String(movie.id)
-      let localItem = movie.storagePath ? movie : localItemFor(externalId)
+      let localItem = movie.storagePath ? movie : movie.localItem?.storagePath ? movie.localItem : localItemFor(externalId)
+      let directPlayback = false
+      if (!localItem?.storagePath && movie.catalogItemId != null) {
+        localItem = await findLocalItemById(movie.catalogItemId)
+      }
       if (!localItem?.storagePath) {
         localItem = await findLocalItemByExternalId(externalId)
+      }
+      if (!preserveQueue) {
+        playlist.replaceQueueWithItem({
+          ...movie,
+          externalId,
+          id: localItem?.id ?? movie.id,
+          catalogItemId: localItem?.id ?? movie.catalogItemId ?? null,
+          kind: movie.kind ?? 'movie',
+          sourceKey: movie.sourceKey ?? null,
+          localItem,
+        })
+        playerMinimized.value = false
       }
 
       if (localItem?.storagePath) {
         // Catalog item that lives on disk → play the local file directly.
         const { data } = await api.post(`/catalog-items/${localItem.id}/local`)
         streamUrl.value = data.url
-        streamType.value = 'mp4'
+        streamType.value = 'video/mp4'
         playingLocal.value = true
       } else {
         // Catalog items use their TMDB `externalId`; plain TMDB movies use their own `id`.
         const tmdbId = movie.externalId ? String(movie.externalId) : String(movie.id)
-        streamUrl.value = await resolveProviderStream(tmdbId)
-        streamType.value = 'hls'
+        const resolved = await resolveProviderStream(tmdbId, { sourceKey: movie.sourceKey ?? null })
+        streamUrl.value = resolved.url
+        streamType.value = resolved.contentType
+        directPlayback = resolved.directPlayback
         playingLocal.value = false
       }
       const tmdbId = Number(localItem?.externalId ?? movie.externalId ?? movie.id)
@@ -165,10 +202,10 @@ export function usePlayback() {
             year: localItem.year ?? movie.year,
             overview: localItem.overview ?? movie.overview,
           }
-        : movie
+        : { ...movie, directPlayback }
       subtitleQuery.value = currentMovie.value.title
       playerOpen.value = true
-      if (player) loadCurrentSource()
+      if (player) { await nextTick(); loadCurrentSource() }
       loadSubtitles()
     } catch (e) {
       error.value = formatPluginError(e)
@@ -177,18 +214,45 @@ export function usePlayback() {
     }
   }
 
-  async function onPlayEpisode(show, season, episode, ep) {
+  async function onPlayEpisode(show, season, episode, ep, { preserveQueue = false } = {}) {
     beginPlayLoading()
     error.value = ''
+    playbackError.value = ''
+    retryCurrentPlayback = () => onPlayEpisode(show, season, episode, ep, { preserveQueue: true })
     try {
+      if (!preserveQueue) {
+        playlist.replaceQueueWithItem({
+          kind: 'tv',
+          externalId: String(show.id),
+          title: `${show.title} – S${season}E${episode}${ep?.title ? ` · ${ep.title}` : ''}`,
+          overview: ep?.overview ?? show.overview ?? '',
+          artworkUrl: ep?.stillUrl ?? show.posterUrl ?? null,
+          sourceKey: show.sourceKey ?? null,
+          isEpisode: true,
+          show,
+          season,
+          episode,
+          episodeInfo: ep,
+        })
+        playerMinimized.value = false
+      }
       // TV episodes resolve through the stream provider — there's no per-episode
       // local catalog match, so no local-file path to try first.
-      streamUrl.value = await resolveProviderStream(show.id, { season, episode })
-      streamType.value = 'hls'
+      const resolved = await resolveProviderStream(show.id, {
+        season,
+        episode,
+        sourceKey: show.sourceKey ?? null,
+      })
+      streamUrl.value = resolved.url
+      streamType.value = resolved.contentType
       playingLocal.value = false
       currentMovie.value = {
         id: show.id,
+        kind: 'tv',
         isEpisode: true,
+        directPlayback: resolved.directPlayback,
+        show,
+        sourceKey: show.sourceKey ?? null,
         season,
         episode,
         title: `${show.title} – S${season}E${episode}${ep?.title ? ` · ${ep.title}` : ''}`,
@@ -196,10 +260,52 @@ export function usePlayback() {
         year: ep?.airDate ? String(ep.airDate).slice(0, 4) : (show.year ?? null),
       }
       playerOpen.value = true
-      if (player) loadCurrentSource()
+      if (player) { await nextTick(); loadCurrentSource() }
       loadSubtitles()
     } catch (e) {
       error.value = formatPluginError(e)
+    } finally {
+      endPlayLoading()
+    }
+  }
+
+  async function onPlaySourceItem(item, sourceKey, { preserveQueue = false } = {}) {
+    beginPlayLoading()
+    error.value = ''
+    playbackError.value = ''
+    retryCurrentPlayback = () => onPlaySourceItem(item, sourceKey, { preserveQueue: true })
+    try {
+      const externalId = String(item.externalId ?? item.id ?? '')
+      if (!externalId) throw new Error('This source item has no provider ID.')
+      if (!preserveQueue) {
+        playlist.replaceQueueWithItem({ ...item, externalId, sourceKey, kind: item.kind ?? 'music' })
+        playerMinimized.value = false
+      }
+
+      const resolved = await resolveProviderStream(externalId, { sourceKey })
+      streamUrl.value = resolved.url
+      streamType.value = resolved.contentType
+      playingLocal.value = false
+      currentMovie.value = {
+        ...item,
+        id: externalId,
+        externalId,
+        kind: item.kind,
+        directPlayback: resolved.directPlayback,
+        title: item.title ?? externalId,
+        posterUrl: item.posterUrl ?? item.artworkUrl ?? null,
+      }
+      subtitleQuery.value = currentMovie.value.title
+      if (String(item.kind ?? '').toLowerCase() === 'music') {
+        subtitles.value = []
+        activeSub.value = null
+        subtitlePanelOpen.value = false
+      }
+      playerOpen.value = true
+      if (player) { await nextTick(); loadCurrentSource() }
+      if (String(item.kind ?? '').toLowerCase() !== 'music') loadSubtitles()
+    } catch (requestError) {
+      error.value = formatPluginError(requestError)
     } finally {
       endPlayLoading()
     }
@@ -214,16 +320,127 @@ export function usePlayback() {
       html5: { vhs: { overrideNative: true } },
     })
     player.on('ended', () => {
-      if (currentMovie.value?.isEpisode) tvNextHandler.value?.()
+      if (playlist.hasNext.value) void playQueueItem(playlist.currentIndex.value + 1)
+      else if (currentMovie.value?.isEpisode) {
+        if (tvNextHandler.value && String(tvNextShowId.value) === String(currentMovie.value.id)) {
+          tvNextHandler.value()
+        } else {
+          void advanceTvEpisodeAutomatically()
+        }
+      }
     })
+    player.on('error', () => {
+      if (player?.error())
+        playbackError.value = 'Playback could not continue. The stream may have expired or become unavailable.'
+    })
+    player.on('play', () => { playerPaused.value = false })
+    player.on('pause', () => { playerPaused.value = true })
+    player.on('timeupdate', updatePlaybackMetrics)
+    player.on('durationchange', updatePlaybackMetrics)
     window.removeEventListener('keydown', onPlayerKeydown)
     window.addEventListener('keydown', onPlayerKeydown)
     // Autoplay: the click that opened the player counts as a user gesture, so try
     // with sound first and fall back to muted if the browser blocks it.
     player.ready(() => {
       loadCurrentSource()
-      if (isTouchDevice) player.requestFullscreen?.()
+      if (isTouchDevice && !streamType.value.startsWith('audio/')) player.requestFullscreen?.()
     })
+  }
+
+  async function retryPlayback() {
+    if (!retryCurrentPlayback) return
+    playbackError.value = ''
+    await retryCurrentPlayback()
+  }
+
+  function updatePlaybackMetrics() {
+    if (!player) return
+    const current = player.currentTime()
+    const duration = player.duration()
+    playbackCurrentTime.value = Number.isFinite(current) ? current : 0
+    playbackDuration.value = Number.isFinite(duration) ? duration : 0
+  }
+
+  function togglePlayback() {
+    if (!player) return
+    if (player.paused()) player.play()?.catch?.(() => {})
+    else player.pause()
+  }
+
+  function seekPlayback(time) {
+    if (!player || !Number.isFinite(Number(time))) return
+    const duration = player.duration()
+    player.currentTime(Number.isFinite(duration) ? Math.max(0, Math.min(duration, Number(time))) : Math.max(0, Number(time)))
+  }
+
+  function togglePlayerMinimized() {
+    playerMinimized.value = !playerMinimized.value
+    nextTick(() => player?.trigger('resize'))
+  }
+
+  async function playQueueItem(index) {
+    const item = playlist.setCurrentIndex(index)
+    if (!item) return
+    if (item.isEpisode) {
+      const show = item.show ?? { id: item.externalId, title: item.title }
+      await onPlayEpisode(show, item.season, item.episode, item.episodeInfo, { preserveQueue: true })
+    } else if (item.sourceKey) {
+      await onPlaySourceItem(item, item.sourceKey, { preserveQueue: true })
+    } else {
+      await onPlay(item, { preserveQueue: true })
+    }
+  }
+
+  async function playNextInQueue() {
+    if (playlist.hasNext.value) await playQueueItem(playlist.currentIndex.value + 1)
+  }
+
+  async function advanceTvEpisodeAutomatically() {
+    const current = currentMovie.value
+    const show = current?.show
+    if (!autoplay.value || !current?.isEpisode || !show || current.season == null || current.episode == null) return
+
+    try {
+      const { data: details } = await api.get(`/tv-shows/${encodeURIComponent(show.id)}/details`)
+      const { data: seasonData } = await api.get(
+        `/tv-shows/${encodeURIComponent(show.id)}/season/${encodeURIComponent(current.season)}`,
+      )
+      const episodes = seasonData.episodes ?? []
+      const index = episodes.findIndex((episode) => episode.episodeNumber === current.episode)
+      let nextSeason = current.season
+      let nextEpisode = index >= 0 && index + 1 < episodes.length ? episodes[index + 1] : null
+
+      if (!nextEpisode) {
+        const season = [...(details.seasons ?? [])]
+          .sort((left, right) => left.seasonNumber - right.seasonNumber)
+          .find((entry) => entry.seasonNumber > current.season)
+        if (!season) return
+        nextSeason = season.seasonNumber
+        const { data: nextSeasonData } = await api.get(
+          `/tv-shows/${encodeURIComponent(show.id)}/season/${encodeURIComponent(nextSeason)}`,
+        )
+        nextEpisode = nextSeasonData.episodes?.[0] ?? null
+      }
+
+      if (nextEpisode) {
+        await onPlayEpisode(
+          { ...show, sourceKey: current.sourceKey ?? show.sourceKey ?? null },
+          nextSeason,
+          nextEpisode.episodeNumber,
+          nextEpisode,
+        )
+      }
+    } catch {
+      // Keep the finished episode in the player if metadata lookup fails.
+    }
+  }
+
+  async function playPreviousInQueue() {
+    if (player && playbackCurrentTime.value > 3) {
+      seekPlayback(0)
+      return
+    }
+    if (playlist.hasPrevious.value) await playQueueItem(playlist.currentIndex.value - 1)
   }
 
   // Seconds skipped per ArrowLeft / ArrowRight press.
@@ -253,7 +470,7 @@ export function usePlayback() {
   function loadCurrentSource() {
     if (!player) return
     clearAppliedSubtitleTracks()
-    player.src({ src: streamUrl.value, type: streamType.value === 'mp4' ? 'video/mp4' : 'application/vnd.apple.mpegurl' })
+    player.src({ src: streamUrl.value, type: streamType.value })
     attemptPlay()
   }
 
@@ -295,6 +512,11 @@ export function usePlayback() {
     playLoading.value = false
     player?.dispose()
     player = null
+    retryCurrentPlayback = null
+    playerMinimized.value = false
+    playerPaused.value = true
+    playbackCurrentTime.value = 0
+    playbackDuration.value = 0
     subtitlePanelOpen.value = false
     if (subtitleObjectUrl) URL.revokeObjectURL(subtitleObjectUrl)
     subtitleObjectUrl = null
@@ -324,8 +546,9 @@ export function usePlayback() {
     }
   }
 
-  function setTvNextHandler(fn) {
+  function setTvNextHandler(fn, showId = null) {
     tvNextHandler.value = fn ?? null
+    tvNextShowId.value = fn ? showId : null
   }
 
   async function searchSubtitles() {
@@ -420,12 +643,31 @@ export function usePlayback() {
   }
 `)
 
-  onBeforeUnmount(destroyPlayer)
-
   return {
     playLoading,
     playerOpen,
+    playerMinimized,
     currentMovie,
+    playbackError,
+    playerPaused,
+    playbackCurrentTime,
+    playbackDuration,
+    queue: playlist.queue,
+    savedPlaylists: playlist.savedPlaylists,
+    activePlaylistId: playlist.activePlaylistId,
+    currentIndex: playlist.currentIndex,
+    currentQueueItem: playlist.currentItem,
+    currentPlaylistName: playlist.currentPlaylistName,
+    playlistDrawerOpen: playlist.playlistDrawerOpen,
+    addToQueue: playlist.addToQueue,
+    removeQueueItem: playlist.removeQueueItem,
+    clearQueue: playlist.clearQueue,
+    createPlaylist: playlist.createPlaylist,
+    saveCurrentQueue: playlist.saveCurrentQueue,
+    loadSavedPlaylist: playlist.loadSavedPlaylist,
+    addToSavedPlaylist: playlist.addToSavedPlaylist,
+    removeSavedPlaylist: playlist.removeSavedPlaylist,
+    setQueueIndex: playlist.setCurrentIndex,
     streamUrl,
     streamType,
     playingLocal,
@@ -443,6 +685,14 @@ export function usePlayback() {
     cueStyle,
     onPlay,
     onPlayEpisode,
+    onPlaySourceItem,
+    retryPlayback,
+    playQueueItem,
+    playNextInQueue,
+    playPreviousInQueue,
+    togglePlayback,
+    seekPlayback,
+    togglePlayerMinimized,
     resolveProviderStream,
     setTvNextHandler,
     initPlayer,

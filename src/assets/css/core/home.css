@@ -111,6 +111,49 @@
   align-items: flex-start;
 }
 
+.stream-nav-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.stream-nav-signal {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  overflow: visible;
+  transform: rotate(90deg);
+}
+
+.stream-nav-wave {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0.28;
+  animation: stream-nav-wave-pulse 1.35s ease-in-out infinite;
+}
+
+.stream-nav-wave--1 { animation-delay: 0s; }
+.stream-nav-wave--2 { animation-delay: 0.18s; }
+.stream-nav-wave--3 { animation-delay: 0.36s; }
+
+.stream-nav-signal-dot {
+  fill: currentColor;
+}
+
+@keyframes stream-nav-wave-pulse {
+  0%, 15%, 100% { opacity: 0.28; }
+  45%, 75% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-nav-wave {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 .home-panel {
   flex: 1;
   min-width: 0;
@@ -118,13 +161,23 @@
   padding: 16px;
 }
 
+.home-panel.home-panel--with-tabs {
+  padding-top: 0;
+}
+
 /* ── Stream sub-tabs (slim bar above the browse area) ── */
 .stream-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 0 4px 12px;
+  padding: 12px 4px;
+  margin: 0 -16px 12px;
+  background: #080c16;
+  border-bottom: 1px solid #1a2333;
 }
 
 .stream-tab {
@@ -292,6 +345,14 @@
   width: 100%;
   height: 100%;
   background: #1a2333;
+}
+
+.poster-info-button {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  left: 8px;
+  background: rgba(8, 12, 22, 0.88);
 }
 
 .poster-fallback {

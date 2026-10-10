@@ -9,8 +9,7 @@ const tvLoading = ref(false)
 const tvError = ref('')
 const tvKeyMissing = ref(false)
 
-// Detail sheet state (shared so the grid and the sheet see it; TV has no
-// playback yet, so this is browse-only — seasons & episodes).
+// Detail sheet state is shared by browse, playback, and search entry points.
 const tvSheetOpen = ref(false)
 const tvSheetShow = ref(null)
 const tvSheetDetails = ref(null)
