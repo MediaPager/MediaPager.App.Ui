@@ -16,6 +16,7 @@ import NotFoundPage from './NotFoundPage.vue'
 import NoCatalogsScreen from './NoCatalogsScreen.vue'
 import CatalogItemEditDialog from './CatalogItemEditDialog.vue'
 import CatalogUploadDialog from './CatalogUploadDialog.vue'
+import MusicCatalogBrowser from './MusicCatalogBrowser.vue'
 import ItemRatingMenu from './ItemRatingMenu.vue'
 import PluginActionButtons from './PluginActionButtons.vue'
 
@@ -191,6 +192,7 @@ function selectMediaTab(tabKey) {
 const itemEditOpen = ref(false)
 const itemEditTarget = ref(null)
 const catalogUploadOpen = ref(false)
+const musicRefreshToken = ref(0)
 watch(selectedCatalog, (catalog) => {
   if (catalog) fetchItems(catalog.id)
 }, { immediate: true })
@@ -202,7 +204,15 @@ function openItemEditor(item) {
 
 async function onCatalogItemCreated() {
   if (selectedCatalog.value) await fetchItems(selectedCatalog.value.id)
+  musicRefreshToken.value++
   await refreshLocalMap()
+}
+
+function onCatalogItemChanged() {
+  musicRefreshToken.value++
+  void refreshLocalMap()
+  if (selectedCatalog.value && selectedCatalog.value.catalogType.slug !== 'music')
+    void fetchItems(selectedCatalog.value.id)
 }
 
 watch(pluginJobs, (jobs) => {
@@ -621,8 +631,30 @@ function onDragEnd() {
 
         <template v-else-if="homeTab.startsWith('catalog:')">
           <div v-if="selectedCatalog" class="catalog-panel">
-            <div v-if="canEditCatalogs" class="row justify-end full-width q-mb-md">
+            <div class="catalog-toolbar row items-center full-width q-mb-lg">
+              <div class="catalog-toolbar-icon flex flex-center">
+                <q-icon
+                  :name="selectedCatalog.catalogType.mediaType.slug === 'video' ? 'movie'
+                    : selectedCatalog.catalogType.mediaType.slug === 'audio' ? 'headphones'
+                    : 'menu_book'"
+                  size="1.5rem"
+                  color="primary"
+                />
+              </div>
+              <div class="catalog-toolbar-copy">
+                <div class="row items-center q-gutter-sm">
+                  <div class="catalog-panel-name">{{ selectedCatalog.name }}</div>
+                  <q-badge outline color="primary">{{ selectedCatalog.catalogType.name }}</q-badge>
+                  <q-badge outline color="grey-5">{{ selectedCatalog.catalogType.mediaType.name }}</q-badge>
+                </div>
+                <div class="catalog-toolbar-subtitle">
+                  <span v-if="selectedCatalog.description">{{ selectedCatalog.description }}</span>
+                  <span v-if="selectedCatalog.path"><q-icon name="folder" size="13px" /> {{ selectedCatalog.path }}</span>
+                </div>
+              </div>
+              <q-space />
               <q-btn
+                v-if="canEditCatalogs"
                 unelevated
                 color="primary"
                 text-color="dark"
@@ -633,39 +665,26 @@ function onDragEnd() {
                 @click="catalogUploadOpen = true"
               />
             </div>
-            <div v-if="!itemsLoading && !itemsError && items.length === 0" class="catalog-header">
-              <div class="catalog-panel-icon flex flex-center">
-                <q-icon
-                  :name="selectedCatalog.catalogType.mediaType.slug === 'video' ? 'movie'
-                    : selectedCatalog.catalogType.mediaType.slug === 'audio' ? 'headphones'
-                    : 'menu_book'"
-                  size="3rem"
-                  color="primary"
-                />
-              </div>
-              <div class="catalog-panel-name">{{ selectedCatalog.name }}</div>
-              <div class="catalog-panel-meta">
-                {{ selectedCatalog.catalogType.name }}
-                · {{ selectedCatalog.catalogType.mediaType.name }}
-              </div>
-              <div v-if="selectedCatalog.description" class="catalog-panel-desc">
-                {{ selectedCatalog.description }}
-              </div>
-              <div v-if="selectedCatalog.path" class="catalog-panel-path">
-                <q-icon name="folder" size="14px" /> {{ selectedCatalog.path }}
-              </div>
-            </div>
-            <div v-else-if="items.length > 0" class="catalog-compact-title">
-              {{ selectedCatalog.name }}
-            </div>
 
-            <q-banner v-if="itemsError" dense class="error q-mb-md" rounded>
+            <q-banner v-if="itemsError && selectedCatalog.catalogType.slug !== 'music'" dense class="error q-mb-md" rounded>
               <template #avatar>
                 <q-icon name="error" color="negative" />
               </template>
               {{ itemsError }}
             </q-banner>
 
+            <MusicCatalogBrowser
+              v-if="selectedCatalog.catalogType.slug === 'music'"
+              :key="selectedCatalog.id"
+              :catalog="selectedCatalog"
+              :can-edit-catalogs="canEditCatalogs"
+              :refresh-token="musicRefreshToken"
+              @play="onPlay"
+              @edit="openItemEditor"
+              @changed="onCatalogItemChanged"
+            />
+
+            <template v-else>
             <div class="movie-grid catalog-items-grid">
               <div v-for="item in items" :key="item.id" class="movie-grid-item">
                 <q-card
@@ -738,6 +757,7 @@ function onDragEnd() {
             <div v-if="!itemsLoading && !itemsError && items.length === 0" class="text-grey-6 text-center q-mt-lg">
               nothing in this library yet
             </div>
+            </template>
           </div>
           <div v-else class="coming-soon flex flex-center">
             <div class="text-center">
@@ -753,8 +773,8 @@ function onDragEnd() {
     <CatalogItemEditDialog
       v-model:open="itemEditOpen"
       v-model:item="itemEditTarget"
-      @saved="refreshLocalMap"
-      @deleted="refreshLocalMap"
+      @saved="onCatalogItemChanged"
+      @deleted="onCatalogItemChanged"
     />
     <CatalogUploadDialog
       v-model:open="catalogUploadOpen"

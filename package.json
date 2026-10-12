@@ -6,12 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test": "node --test src/composables/*.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
     "@quasar/extras": "^2.1.0",
+    "@nobugsgiven/quasar-interop": "file:../NoBugsGiven.Quasar.Interop/packages/vue",
     "@videojs/http-streaming": "^3.17.5",
     "axios": "^1.20.0",
+    "pinia": "^4.0.3",
     "quasar": "^2.34.0",
     "video.js": "^8.24.1",
     "vue": "^3.5.42",
