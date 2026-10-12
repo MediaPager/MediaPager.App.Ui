@@ -1,5 +1,5 @@
 <script setup>
-import { computed, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   usePlayback,
   languages,
@@ -14,6 +14,12 @@ const {
   playerPaused,
   playbackCurrentTime,
   playbackDuration,
+  playbackVolume,
+  playbackMuted,
+  playbackRate,
+  queue,
+  hasNext,
+  hasPrevious,
   videoEl,
   subtitles,
   subsLoading,
@@ -35,20 +41,38 @@ const {
   togglePlayerMinimized,
   togglePlayback,
   seekPlayback,
+  setPlaybackVolume,
+  toggleMute,
+  setPlaybackRate,
+  toggleFullscreen,
   playPreviousInQueue,
   playNextInQueue,
+  restorePlayerAndEnterFullscreen,
+  stopPlayback,
 } = usePlayback()
 
 const isMusic = computed(() => currentMovie.value?.kind === 'music')
+const playbackRateOptions = [0.5, 0.75, 1, 1.25, 1.5, 2].map(value => ({ label: `${value}×`, value }))
+const miniVolumeOpen = ref(false)
+const miniSeekHovered = ref(false)
+const miniSeekFocused = ref(false)
+const miniSeekActive = computed(() => miniSeekHovered.value || miniSeekFocused.value)
+const miniSeekLabelPosition = computed(() => {
+  const duration = playbackDuration.value
+  const progress = duration > 0 ? playbackCurrentTime.value / duration : 0
+  return `${Math.max(5, Math.min(95, progress * 100))}%`
+})
 
 watch(playerOpen, (open) => {
   if (open) void initPlayer()
   else destroyPlayer()
 }, { flush: 'post' })
 
-function closePlayer() {
-  playerOpen.value = false
-}
+watch([playerOpen, playerMinimized], ([open, minimized]) => {
+  document.body.classList.toggle('player-modal-open', open && !minimized)
+}, { flush: 'post' })
+
+onBeforeUnmount(() => document.body.classList.remove('player-modal-open'))
 
 function formatTime(seconds) {
   const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0
@@ -70,35 +94,15 @@ function formatTime(seconds) {
     >
       <div v-if="!playerMinimized" class="player-backdrop" />
       <q-card dark class="player-card column">
-        <q-bar class="player-bar">
+        <q-bar v-if="!playerMinimized" class="player-bar">
           <div class="player-title ellipsis text-weight-bold">
             {{ currentMovie?.title }}<span v-if="currentMovie?.year && !isMusic"> ({{ currentMovie.year }})</span>
           </div>
           <q-space />
-          <q-btn
-            v-if="playerMinimized"
-            dense
-            flat
-            round
-            icon="open_in_full"
-            aria-label="Expand player"
-            title="Expand player"
-            @click="togglePlayerMinimized"
-          />
-          <q-btn
-            v-else
-            dense
-            flat
-            round
-            icon="minimize"
-            aria-label="Minimize player"
-            title="Minimize player"
-            @click="togglePlayerMinimized"
-          />
-          <q-btn dense flat round icon="close" aria-label="Close player" title="Close player" @click="closePlayer" />
+          <q-btn dense flat round icon="minimize" aria-label="Minimize player" title="Minimize player" @click="togglePlayerMinimized" />
         </q-bar>
 
-        <div class="player-content col">
+        <div class="player-content col" :class="{ 'player-content--hidden': playerMinimized }">
           <div class="player-stage">
             <video
               ref="videoEl"
@@ -228,42 +232,160 @@ function formatTime(seconds) {
             </div>
           </div>
 
-          <div v-if="isMusic && !playerMinimized" class="music-player-controls column q-pa-md">
-            <div class="row items-center q-gutter-sm">
-              <span class="text-caption text-grey-5">{{ formatTime(playbackCurrentTime) }}</span>
+          <div v-if="!playerMinimized" class="player-controls">
+            <div class="player-seek-row">
+              <span class="player-control-time">{{ formatTime(playbackCurrentTime) }}</span>
               <q-slider
-                class="col music-seek"
+                class="player-seek"
                 :model-value="playbackCurrentTime"
                 :min="0"
                 :max="Math.max(playbackDuration, 1)"
                 color="primary"
+                aria-label="Seek playback"
                 @update:model-value="seekPlayback"
               />
-              <span class="text-caption text-grey-5">{{ formatTime(playbackDuration) }}</span>
+              <span class="player-control-time">{{ formatTime(playbackDuration) }}</span>
             </div>
-            <div class="row items-center justify-center q-gutter-md">
-              <q-btn flat round icon="skip_previous" aria-label="Previous track" @click="playPreviousInQueue" />
-              <q-btn unelevated round color="primary" text-color="dark" :icon="playerPaused ? 'play_arrow' : 'pause'" :aria-label="playerPaused ? 'Play' : 'Pause'" @click="togglePlayback" />
-              <q-btn flat round icon="skip_next" aria-label="Next track" @click="playNextInQueue" />
+            <div class="player-actions-row">
+              <div class="player-volume-controls">
+                <q-btn flat round dense :icon="playerMuted || playbackVolume === 0 ? 'volume_off' : 'volume_up'" :aria-label="playerMuted ? 'Unmute' : 'Mute'" :title="playerMuted ? 'Unmute' : 'Mute'" @click="toggleMute" />
+                <q-slider class="player-volume-slider" :model-value="playbackVolume" :min="0" :max="1.2" :step="0.01" color="primary" aria-label="Volume" @update:model-value="setPlaybackVolume" />
+              </div>
+              <div class="player-transport">
+                <q-btn flat round dense icon="skip_previous" aria-label="Previous item" title="Previous item" :disable="!hasPrevious" @click="playPreviousInQueue" />
+                <q-btn unelevated round color="primary" text-color="dark" :icon="playerPaused ? 'play_arrow' : 'pause'" :aria-label="playerPaused ? 'Play' : 'Pause'" @click="togglePlayback" />
+                <q-btn flat round dense icon="skip_next" aria-label="Next item" title="Next item" :disable="!hasNext" @click="playNextInQueue" />
+                <q-btn flat round dense color="negative" icon="stop" aria-label="Stop playback" title="Stop playback" @click="stopPlayback" />
+              </div>
+              <div class="player-end-controls">
+              <select
+                class="player-rate-select"
+                :value="playbackRate"
+                aria-label="Playback speed"
+                title="Playback speed"
+                @change="setPlaybackRate($event.target.value)"
+              >
+                <option v-for="option in playbackRateOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+                <q-btn v-if="!isMusic" flat round dense icon="fullscreen" aria-label="Enter fullscreen" title="Enter fullscreen" @click="toggleFullscreen" />
+              </div>
             </div>
           </div>
 
-          <div v-if="playerMinimized" class="player-mini-controls row items-center q-gutter-xs q-px-sm q-pb-sm">
-            <q-btn flat round dense icon="skip_previous" aria-label="Previous item" @click="playPreviousInQueue" />
-            <q-btn flat round dense :icon="playerPaused ? 'play_arrow' : 'pause'" :aria-label="playerPaused ? 'Play' : 'Pause'" @click="togglePlayback" />
-            <q-btn flat round dense icon="skip_next" aria-label="Next item" @click="playNextInQueue" />
+        </div>
+
+      </q-card>
+    </div>
+
+    <div
+      v-if="playerOpen"
+      class="player-mini-dock"
+      :class="{ 'player-mini-dock--under-modal': !playerMinimized }"
+    >
+      <div class="player-mini-bar">
+        <div class="player-mini-progress row items-center no-wrap">
+          <div
+            class="player-mini-seek-wrap"
+            @pointerenter="miniSeekHovered = true"
+            @pointerleave="miniSeekHovered = false"
+            @focusin="miniSeekFocused = true"
+            @focusout="miniSeekFocused = false"
+          >
+            <div v-if="miniSeekActive" class="player-mini-seek-label" :style="{ left: miniSeekLabelPosition }">
+              {{ formatTime(playbackCurrentTime) }} / {{ formatTime(playbackDuration) }}
+            </div>
             <q-slider
-              class="col player-mini-seek"
+              class="player-mini-seek"
+              :class="{ 'player-mini-seek--playing': !playerPaused }"
               :model-value="playbackCurrentTime"
               :min="0"
               :max="Math.max(playbackDuration, 1)"
               color="primary"
+              aria-label="Seek playback"
               @update:model-value="seekPlayback"
             />
-            <span class="player-mini-time">{{ formatTime(playbackCurrentTime) }}</span>
           </div>
         </div>
-      </q-card>
+        <div class="player-mini-main">
+          <div class="player-mini-media">
+            <q-img
+              :src="currentMovie?.artworkUrl ?? currentMovie?.posterUrl ?? undefined"
+              fit="cover"
+              class="player-mini-art"
+            >
+              <template #error><div class="absolute-full flex flex-center bg-grey-10"><q-icon :name="isMusic ? 'music_note' : 'movie'" color="grey-6" /></div></template>
+            </q-img>
+            <div class="player-mini-info">
+              <div class="player-mini-title ellipsis">{{ currentMovie?.title }}</div>
+              <div class="player-mini-subtitle ellipsis">{{ currentMovie?.artist ?? currentMovie?.album ?? currentMovie?.year ?? '' }}</div>
+            </div>
+          </div>
+          <div class="player-mini-transport">
+            <q-btn flat round dense icon="skip_previous" aria-label="Previous item" title="Previous item" :disable="!hasPrevious" @click="playPreviousInQueue" />
+            <q-btn unelevated round color="primary" text-color="dark" :icon="playerPaused ? 'play_arrow' : 'pause'" :aria-label="playerPaused ? 'Play' : 'Pause'" @click="togglePlayback" />
+            <q-btn flat round dense icon="skip_next" aria-label="Next item" title="Next item" :disable="!hasNext" @click="playNextInQueue" />
+            <q-btn flat round dense color="negative" icon="stop" aria-label="Stop playback" title="Stop playback" @click="stopPlayback" />
+          </div>
+          <div class="player-mini-end-controls">
+            <div class="player-mini-volume-control" @keydown.esc="miniVolumeOpen = false">
+              <div v-if="miniVolumeOpen" class="player-mini-volume-popover column items-center q-pa-sm">
+                <div class="player-mini-volume-value">{{ Math.round(playbackVolume * 100) }}%</div>
+                <q-slider
+                  class="player-mini-volume-slider"
+                  :model-value="playbackVolume"
+                  :min="0"
+                  :max="1.2"
+                  :step="0.01"
+                  vertical
+                  reverse
+                  color="primary"
+                  aria-label="Volume"
+                  @update:model-value="setPlaybackVolume"
+                />
+                <q-btn flat round dense :icon="playerMuted ? 'volume_off' : 'volume_up'" :aria-label="playerMuted ? 'Unmute' : 'Mute'" :title="playerMuted ? 'Unmute' : 'Mute'" @click="toggleMute" />
+              </div>
+              <q-btn
+                flat
+                round
+                dense
+                :icon="playerMuted || playbackVolume === 0 ? 'volume_off' : 'volume_up'"
+                aria-label="Adjust volume"
+                title="Adjust volume"
+                :aria-expanded="miniVolumeOpen"
+                @click="miniVolumeOpen = !miniVolumeOpen"
+              />
+            </div>
+            <select
+              class="player-rate-select player-mini-rate-select"
+              :value="playbackRate"
+              aria-label="Playback speed"
+              title="Playback speed"
+              @change="setPlaybackRate($event.target.value)"
+            >
+              <option v-for="option in playbackRateOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+            <q-btn
+              v-if="!isMusic"
+              flat
+              round
+              dense
+              icon="fullscreen"
+              :aria-label="playerMinimized ? 'Restore and enter fullscreen' : 'Enter fullscreen'"
+              :title="playerMinimized ? 'Restore and enter fullscreen' : 'Enter fullscreen'"
+              @click="playerMinimized ? restorePlayerAndEnterFullscreen() : toggleFullscreen()"
+            />
+            <q-btn
+              flat
+              round
+              dense
+              :icon="playerMinimized ? 'open_in_full' : 'minimize'"
+              :aria-label="playerMinimized ? 'Restore player' : 'Minimize player'"
+              :title="playerMinimized ? 'Restore player' : 'Minimize player'"
+              @click="togglePlayerMinimized"
+            />
+          </div>
+        </div>
+      </div>
     </div>
   </Teleport>
 </template>

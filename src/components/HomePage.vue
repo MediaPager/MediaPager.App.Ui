@@ -1,9 +1,9 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMovies } from '../composables/useMovies'
 import { useTvShows } from '../composables/useTvShows'
-import { useStreamTabs } from '../composables/useStreamTabs'
+import { builtinStreamTabs, useStreamTabs } from '../composables/useStreamTabs'
 import { usePlayback } from '../composables/usePlayback'
 import { useCatalogs } from '../composables/useCatalogs'
 import { useCatalogItems } from '../composables/useCatalogItems'
@@ -16,6 +16,7 @@ import NotFoundPage from './NotFoundPage.vue'
 import NoCatalogsScreen from './NoCatalogsScreen.vue'
 import CatalogItemEditDialog from './CatalogItemEditDialog.vue'
 import CatalogUploadDialog from './CatalogUploadDialog.vue'
+import MusicCatalogBrowser from './MusicCatalogBrowser.vue'
 import ItemRatingMenu from './ItemRatingMenu.vue'
 import PluginActionButtons from './PluginActionButtons.vue'
 
@@ -43,9 +44,18 @@ const {
   totalPages,
   loading,
   error,
+  movieGenres,
+  movieGenreId,
+  movieYear,
+  movieMinRating,
+  movieMinVoteCount,
+  movieLanguage,
+  movieSortBy,
   openDetails,
   openLocalDetails,
   goToPage,
+  applyMovieFilters,
+  clearMovieFilters,
   isTouchDevice,
 } = useMovies()
 const {
@@ -54,9 +64,18 @@ const {
   tvTotalPages,
   tvLoading,
   tvError,
+  tvGenres,
+  tvGenreId,
+  tvYear,
+  tvMinRating,
+  tvMinVoteCount,
+  tvLanguage,
+  tvSortBy,
   openTvDetails,
   goToTvPage,
   fetchTvShows,
+  applyTvFilters,
+  clearTvFilters,
 } = useTvShows()
 const { streamTabs, streamTab, sourceTabs, availableStreamKinds, activeMediaKind, isSourceTab } = useStreamTabs()
 const { onPlay } = usePlayback()
@@ -74,6 +93,51 @@ const {
 const { jobs: pluginJobs } = usePluginActivity()
 const { canEditCatalogs } = useAuth()
 const seenCompletedJobIds = new Set()
+const filterYears = Array.from({ length: new Date().getFullYear() - 1870 + 1 }, (_, index) => {
+  const value = new Date().getFullYear() - index
+  return { label: String(value), value }
+})
+const ratingFilters = [
+  { label: 'Any rating', value: null },
+  { label: '5+ stars', value: 5 },
+  { label: '6+ stars', value: 6 },
+  { label: '7+ stars', value: 7 },
+  { label: '8+ stars', value: 8 },
+]
+const voteCountFilters = [
+  { label: 'Any vote count', value: null },
+  { label: '25+ votes', value: 25 },
+  { label: '100+ votes', value: 100 },
+  { label: '500+ votes', value: 500 },
+  { label: '1,000+ votes', value: 1000 },
+]
+const languageFilters = [
+  { label: 'Any language', value: null },
+  { label: 'English', value: 'en' },
+  { label: 'Spanish', value: 'es' },
+  { label: 'French', value: 'fr' },
+  { label: 'German', value: 'de' },
+  { label: 'Italian', value: 'it' },
+  { label: 'Japanese', value: 'ja' },
+  { label: 'Korean', value: 'ko' },
+  { label: 'Chinese', value: 'zh' },
+  { label: 'Hindi', value: 'hi' },
+  { label: 'Portuguese', value: 'pt' },
+]
+const movieSortFilters = [
+  { label: 'Popularity', value: 'popularity.desc' },
+  { label: 'Top rated', value: 'vote_average.desc' },
+  { label: 'Newest releases', value: 'primary_release_date.desc' },
+  { label: 'Title A–Z', value: 'title.asc' },
+]
+const tvSortFilters = [
+  { label: 'Popularity', value: 'popularity.desc' },
+  { label: 'Top rated', value: 'vote_average.desc' },
+  { label: 'Newest premieres', value: 'first_air_date.desc' },
+  { label: 'Title A–Z', value: 'name.asc' },
+]
+const hasMovieFilters = computed(() => movieGenreId.value != null || movieYear.value != null || movieMinRating.value != null || movieMinVoteCount.value != null || movieLanguage.value !== 'en' || movieSortBy.value !== 'popularity.desc')
+const hasTvFilters = computed(() => tvGenreId.value != null || tvYear.value != null || tvMinRating.value != null || tvMinVoteCount.value != null || tvLanguage.value !== 'en' || tvSortBy.value !== 'popularity.desc')
 
 // Own the "is this movie already in the library?" lookup: catalog tabs and the stream
 // grid both need it (stream shows edit when a local copy exists).
@@ -145,12 +209,26 @@ const showStreamNav = computed(() => {
 // stream screen (covers '/', deep links, and back/forward onto /stream/…). With no
 // catalogs either, noCatalogsScreen takes over on the same route.
 watch(
-  [sourcesLoaded, () => route.name, navCatalogs],
+  [sourcesLoaded, () => route.name, navCatalogs, streamTab, availableStreamKinds, sourceTabs],
   () => {
     if (route.name !== 'stream' || !sourcesLoaded.value) return
-    if (hasOnlineStreamProvider.value) return
-    const first = navCatalogs.value[0]
-    if (first) router.replace({ name: 'catalog', params: { name: first.name } })
+    if (!hasOnlineStreamProvider.value) {
+      const first = navCatalogs.value[0]
+      if (first) router.replace({ name: 'catalog', params: { name: first.name } })
+      return
+    }
+
+    const currentTab = streamTab.value
+    const currentSourceExists = sourceTabs.value.some((source) => source.key === currentTab)
+    const currentBuiltinExists = streamTabs.value.some((tab) => tab.key === currentTab)
+    if ((isSourceTab(currentTab) && currentSourceExists) || currentBuiltinExists) return
+    if (!isSourceTab(currentTab) && !builtinStreamTabs.some((tab) => tab.key === currentTab)) return
+
+    const fallback = streamTabs.value[0]?.key ?? (sourceTabs.value[0] ? `source:${sourceTabs.value[0].sourceKey}` : null)
+    if (fallback) {
+      streamTab.value = fallback
+      router.replace({ name: 'stream', params: { tab: fallback } })
+    }
   },
   { immediate: true },
 )
@@ -161,6 +239,170 @@ const selectedCatalog = computed(() => {
   if (!homeTab.value.startsWith('catalog:')) return null
   const name = homeTab.value.slice('catalog:'.length)
   return navCatalogs.value.find((catalog) => catalog.name === name) ?? null
+})
+
+const showCatalogAlphabetIndex = computed(() =>
+  route.name === 'catalog' && ['movies', 'tv-shows'].includes(selectedCatalog.value?.catalogType?.slug))
+const catalogItemElements = new Map()
+const basicAlphabet = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']
+const catalogAlphaIndexElement = ref(null)
+const catalogAlphaHeight = ref(0)
+const catalogAlphaFontSize = ref(13)
+const catalogAlphaFocus = ref({ from: null, to: null, progress: 0 })
+const catalogAlphaActiveLetter = ref(null)
+const catalogAlphaScrolling = ref(false)
+let catalogAlphaHeightFrame = 0
+let catalogAlphaFocusFrame = 0
+let catalogAlphaScrollTimer = null
+
+const catalogDisplayItems = computed(() => {
+  if (selectedCatalog.value?.catalogType?.slug !== 'tv-shows') return items.value
+  return items.value.filter((item) => item.kind === 'show' && item.parentId == null)
+})
+
+function catalogInitial(title) {
+  const first = Array.from(String(title ?? '').trim())[0]
+  if (!first || /^[0-9]$/u.test(first) || !/^\p{L}$/u.test(first)) return '#'
+  const upper = first.toLocaleUpperCase()
+  return /^[A-Z]$/u.test(upper) ? upper : upper
+}
+
+const catalogAlphabetIndex = computed(() => {
+  const extras = [...new Set(catalogDisplayItems.value
+    .map((item) => catalogInitial(item.title))
+    .filter((initial) => !basicAlphabet.includes(initial)))]
+    .sort((left, right) => left.localeCompare(right))
+  const available = new Set(catalogDisplayItems.value.map((item) => catalogInitial(item.title)))
+  return [...basicAlphabet, ...extras].map((letter) => ({ letter, available: available.has(letter) }))
+})
+
+function setCatalogItemElement(itemId, element) {
+  if (element) catalogItemElements.set(itemId, element)
+  else catalogItemElements.delete(itemId)
+}
+
+function jumpToCatalogInitial(letter) {
+  const item = catalogDisplayItems.value.find((entry) => catalogInitial(entry.title) === letter)
+  catalogItemElements.get(item?.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function updateCatalogAlphaHeight() {
+  catalogAlphaHeightFrame = 0
+  const element = catalogAlphaIndexElement.value
+  if (!element) {
+    catalogAlphaHeight.value = 0
+    return
+  }
+
+  const panelBottom = element.closest('.home-panel')?.getBoundingClientRect().bottom ?? window.innerHeight
+  const top = element.getBoundingClientRect().top
+  const availableHeight = Math.max(0, Math.floor(Math.min(panelBottom, window.innerHeight) - top - 18))
+  const rowHeight = availableHeight / Math.max(catalogAlphabetIndex.value.length, 1)
+  const maxFontSize = window.innerWidth <= 600 ? 15 : 18
+
+  catalogAlphaHeight.value = availableHeight
+  catalogAlphaFontSize.value = Math.min(maxFontSize, Math.max(8, Math.floor(rowHeight * 0.78 * 10) / 10))
+  updateCatalogAlphaFocus()
+}
+
+function updateCatalogAlphaFocus() {
+  catalogAlphaFocusFrame = 0
+  const element = catalogAlphaIndexElement.value
+  if (!element) return
+  const top = element.getBoundingClientRect().top
+  const panel = element.closest('.home-panel')
+  const panelBounds = panel?.getBoundingClientRect()
+  const scrollAnchor = panelBounds
+    ? panelBounds.top + Math.min(100, panelBounds.height * 0.16)
+    : top
+  const initialGroups = []
+  for (const item of catalogDisplayItems.value) {
+    const itemElement = catalogItemElements.get(item.id)
+    if (!itemElement) continue
+    const letter = catalogInitial(item.title)
+    const itemTop = itemElement.getBoundingClientRect().top
+    const last = initialGroups.at(-1)
+    if (last?.letter === letter) continue
+    if (last && Math.abs(last.top - itemTop) < 1) {
+      last.letter = letter
+      last.top = itemTop
+    } else {
+      initialGroups.push({ letter, top: itemTop })
+    }
+  }
+
+  let from = initialGroups[0]?.letter ?? null
+  let to = null
+  let progress = 0
+  if (initialGroups.length > 1) {
+    if (scrollAnchor >= initialGroups.at(-1).top) {
+      from = initialGroups.at(-1).letter
+      progress = 1
+    } else {
+      for (let index = 0; index < initialGroups.length - 1; index++) {
+        const current = initialGroups[index]
+        const next = initialGroups[index + 1]
+        if (scrollAnchor > next.top) continue
+        from = current.letter
+        to = next.letter
+        progress = Math.max(0, Math.min(1, (scrollAnchor - current.top) / Math.max(next.top - current.top, 1)))
+        break
+      }
+    }
+  }
+  catalogAlphaFocus.value = { from, to, progress }
+  if (!catalogAlphaScrolling.value) {
+    catalogAlphaActiveLetter.value = to && progress >= 0.5 ? to : from
+  }
+}
+
+function scheduleCatalogAlphaHeight() {
+  if (!catalogAlphaHeightFrame) {
+    catalogAlphaHeightFrame = requestAnimationFrame(updateCatalogAlphaHeight)
+  }
+}
+
+function scheduleCatalogAlphaFocus() {
+  if (!catalogAlphaFocusFrame) {
+    catalogAlphaFocusFrame = requestAnimationFrame(updateCatalogAlphaFocus)
+  }
+}
+
+function onCatalogPanelScroll() {
+  catalogAlphaScrolling.value = true
+  clearTimeout(catalogAlphaScrollTimer)
+  catalogAlphaScrollTimer = setTimeout(() => {
+    catalogAlphaScrolling.value = false
+    const { from, to, progress } = catalogAlphaFocus.value
+    catalogAlphaActiveLetter.value = to && progress >= 0.5 ? to : from
+  }, 160)
+  scheduleCatalogAlphaFocus()
+}
+
+function catalogAlphaScale(letter) {
+  let emphasis = 0
+  if (catalogAlphaScrolling.value) {
+    const { from, to, progress } = catalogAlphaFocus.value
+    if (letter === from) emphasis = to ? 1 - progress : 1
+    else if (letter === to) emphasis = progress
+  } else if (letter === catalogAlphaActiveLetter.value) {
+    emphasis = 0.25
+  }
+  return `${1 + emphasis * 0.55} ${1 + emphasis * 0.4}`
+}
+
+watch([showCatalogAlphabetIndex, catalogAlphabetIndex], () => nextTick(scheduleCatalogAlphaHeight), { flush: 'post' })
+
+onMounted(() => {
+  window.addEventListener('resize', scheduleCatalogAlphaHeight)
+  nextTick(scheduleCatalogAlphaHeight)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', scheduleCatalogAlphaHeight)
+  clearTimeout(catalogAlphaScrollTimer)
+  if (catalogAlphaHeightFrame) cancelAnimationFrame(catalogAlphaHeightFrame)
+  if (catalogAlphaFocusFrame) cancelAnimationFrame(catalogAlphaFocusFrame)
 })
 
 const catalogSlugToMediaTab = {
@@ -191,6 +433,7 @@ function selectMediaTab(tabKey) {
 const itemEditOpen = ref(false)
 const itemEditTarget = ref(null)
 const catalogUploadOpen = ref(false)
+const musicRefreshToken = ref(0)
 watch(selectedCatalog, (catalog) => {
   if (catalog) fetchItems(catalog.id)
 }, { immediate: true })
@@ -200,9 +443,37 @@ function openItemEditor(item) {
   itemEditOpen.value = true
 }
 
+function openCatalogItemDetails(item) {
+  if (selectedCatalog.value?.catalogType?.slug === 'tv-shows') {
+    const tmdbId = Number(item.externalId)
+    if (Number.isSafeInteger(tmdbId) && tmdbId > 0) {
+      return openTvDetails({
+        id: tmdbId,
+        title: item.title,
+        year: item.year,
+        overview: item.overview,
+        posterUrl: item.imageUrl,
+        backdropUrl: item.backdropUrl,
+        voteAverage: item.rating ?? 0,
+        localItem: item,
+        isCatalogItem: true,
+      })
+    }
+  }
+  return openLocalDetails(item)
+}
+
 async function onCatalogItemCreated() {
   if (selectedCatalog.value) await fetchItems(selectedCatalog.value.id)
+  musicRefreshToken.value++
   await refreshLocalMap()
+}
+
+function onCatalogItemChanged() {
+  musicRefreshToken.value++
+  void refreshLocalMap()
+  if (selectedCatalog.value && selectedCatalog.value.catalogType.slug !== 'music')
+    void fetchItems(selectedCatalog.value.id)
 }
 
 watch(pluginJobs, (jobs) => {
@@ -385,12 +656,16 @@ function onDragEnd() {
 
       <div
         class="home-panel"
-        :class="{ 'home-panel--with-tabs': homeTab === 'stream' || homeTab.startsWith('catalog:') }"
+        :class="{
+          'home-panel--with-tabs': homeTab === 'stream',
+          'home-panel--catalog': homeTab.startsWith('catalog:'),
+        }"
+        @scroll.passive="onCatalogPanelScroll"
       >
         <NoCatalogsScreen v-if="noCatalogsScreen" />
         <NotFoundPage v-else-if="streamTabNotFound || catalogNotFound" />
         <template v-else>
-          <div v-if="homeTab === 'stream' || homeTab.startsWith('catalog:')" class="stream-tabs">
+          <div v-if="homeTab === 'stream'" class="stream-tabs">
             <button
               v-for="tab in streamTabs"
               :key="tab.key"
@@ -407,6 +682,42 @@ function onDragEnd() {
 
           <template v-if="homeTab === 'stream'">
           <template v-if="streamTab === 'movies'">
+            <div class="stream-filter-toolbar q-mb-md">
+              <q-select class="stream-filter-field stream-filter-field--genre"
+                v-model="movieGenreId" dark outlined dense clearable emit-value map-options
+                :options="movieGenres" option-label="name" option-value="id" label="Genre"
+                @update:model-value="applyMovieFilters">
+                <template #prepend><q-icon name="category" /></template>
+              </q-select>
+              <q-select class="stream-filter-field stream-filter-field--year"
+                v-model="movieYear" dark outlined dense clearable emit-value map-options
+                :options="filterYears" label="Release year" @update:model-value="applyMovieFilters">
+                <template #prepend><q-icon name="event" /></template>
+              </q-select>
+              <q-select class="stream-filter-field stream-filter-field--rating"
+                v-model="movieMinRating" dark outlined dense emit-value map-options
+                :options="ratingFilters" label="TMDB rating" @update:model-value="applyMovieFilters">
+                <template #prepend><q-icon name="star" /></template>
+              </q-select>
+              <q-select class="stream-filter-field stream-filter-field--votes"
+                v-model="movieMinVoteCount" dark outlined dense emit-value map-options
+                :options="voteCountFilters" label="Minimum votes" @update:model-value="applyMovieFilters">
+                <template #prepend><q-icon name="groups" /></template>
+              </q-select>
+              <q-select class="stream-filter-field stream-filter-field--language"
+                v-model="movieLanguage" dark outlined dense emit-value map-options
+                :options="languageFilters" label="Original language" @update:model-value="applyMovieFilters">
+                <template #prepend><q-icon name="translate" /></template>
+              </q-select>
+              <q-select class="stream-filter-field stream-filter-field--sort"
+                v-model="movieSortBy" dark outlined dense emit-value map-options
+                :options="movieSortFilters" label="Sort by" @update:model-value="applyMovieFilters">
+                <template #prepend><q-icon name="sort" /></template>
+              </q-select>
+              <q-btn class="stream-filter-clear" flat round dense color="grey-5" icon="filter_alt_off"
+                aria-label="Clear filters" title="Clear filters" :disable="!hasMovieFilters" @click="clearMovieFilters" />
+            </div>
+
             <q-banner v-if="error" dense class="error q-mb-md" rounded>
               <template #avatar>
                 <q-icon name="error" color="negative" />
@@ -503,6 +814,42 @@ function onDragEnd() {
           </template>
 
           <template v-else-if="streamTab === 'tv'">
+            <div class="stream-filter-toolbar q-mb-md">
+              <q-select class="stream-filter-field stream-filter-field--genre"
+                v-model="tvGenreId" dark outlined dense clearable emit-value map-options
+                :options="tvGenres" option-label="name" option-value="id" label="Genre"
+                @update:model-value="applyTvFilters">
+                <template #prepend><q-icon name="category" /></template>
+              </q-select>
+              <q-select class="stream-filter-field stream-filter-field--year"
+                v-model="tvYear" dark outlined dense clearable emit-value map-options
+                :options="filterYears" label="First air year" @update:model-value="applyTvFilters">
+                <template #prepend><q-icon name="event" /></template>
+              </q-select>
+              <q-select class="stream-filter-field stream-filter-field--rating"
+                v-model="tvMinRating" dark outlined dense emit-value map-options
+                :options="ratingFilters" label="TMDB rating" @update:model-value="applyTvFilters">
+                <template #prepend><q-icon name="star" /></template>
+              </q-select>
+              <q-select class="stream-filter-field stream-filter-field--votes"
+                v-model="tvMinVoteCount" dark outlined dense emit-value map-options
+                :options="voteCountFilters" label="Minimum votes" @update:model-value="applyTvFilters">
+                <template #prepend><q-icon name="groups" /></template>
+              </q-select>
+              <q-select class="stream-filter-field stream-filter-field--language"
+                v-model="tvLanguage" dark outlined dense emit-value map-options
+                :options="languageFilters" label="Original language" @update:model-value="applyTvFilters">
+                <template #prepend><q-icon name="translate" /></template>
+              </q-select>
+              <q-select class="stream-filter-field stream-filter-field--sort"
+                v-model="tvSortBy" dark outlined dense emit-value map-options
+                :options="tvSortFilters" label="Sort by" @update:model-value="applyTvFilters">
+                <template #prepend><q-icon name="sort" /></template>
+              </q-select>
+              <q-btn class="stream-filter-clear" flat round dense color="grey-5" icon="filter_alt_off"
+                aria-label="Clear filters" title="Clear filters" :disable="!hasTvFilters" @click="clearTvFilters" />
+            </div>
+
             <q-banner v-if="tvError" dense class="error q-mb-md" rounded>
               <template #avatar>
                 <q-icon name="error" color="negative" />
@@ -621,8 +968,33 @@ function onDragEnd() {
 
         <template v-else-if="homeTab.startsWith('catalog:')">
           <div v-if="selectedCatalog" class="catalog-panel">
-            <div v-if="canEditCatalogs" class="row justify-end full-width q-mb-md">
+            <div
+              class="catalog-toolbar row items-center full-width"
+              :class="selectedCatalog.catalogType.slug === 'music' ? 'q-mb-lg' : 'catalog-toolbar--items'"
+            >
+              <div class="catalog-toolbar-icon flex flex-center">
+                <q-icon
+                  :name="selectedCatalog.catalogType.mediaType.slug === 'video' ? 'movie'
+                    : selectedCatalog.catalogType.mediaType.slug === 'audio' ? 'headphones'
+                    : 'menu_book'"
+                  size="1.5rem"
+                  color="primary"
+                />
+              </div>
+              <div class="catalog-toolbar-copy">
+                <div class="row items-center q-gutter-sm">
+                  <div class="catalog-panel-name">{{ selectedCatalog.name }}</div>
+                  <q-badge outline color="primary">{{ selectedCatalog.catalogType.name }}</q-badge>
+                  <q-badge outline color="grey-5">{{ selectedCatalog.catalogType.mediaType.name }}</q-badge>
+                </div>
+                <div class="catalog-toolbar-subtitle">
+                  <span v-if="selectedCatalog.description">{{ selectedCatalog.description }}</span>
+                  <span v-if="selectedCatalog.path"><q-icon name="folder" size="13px" /> {{ selectedCatalog.path }}</span>
+                </div>
+              </div>
+              <q-space />
               <q-btn
+                v-if="canEditCatalogs"
                 unelevated
                 color="primary"
                 text-color="dark"
@@ -633,45 +1005,39 @@ function onDragEnd() {
                 @click="catalogUploadOpen = true"
               />
             </div>
-            <div v-if="!itemsLoading && !itemsError && items.length === 0" class="catalog-header">
-              <div class="catalog-panel-icon flex flex-center">
-                <q-icon
-                  :name="selectedCatalog.catalogType.mediaType.slug === 'video' ? 'movie'
-                    : selectedCatalog.catalogType.mediaType.slug === 'audio' ? 'headphones'
-                    : 'menu_book'"
-                  size="3rem"
-                  color="primary"
-                />
-              </div>
-              <div class="catalog-panel-name">{{ selectedCatalog.name }}</div>
-              <div class="catalog-panel-meta">
-                {{ selectedCatalog.catalogType.name }}
-                · {{ selectedCatalog.catalogType.mediaType.name }}
-              </div>
-              <div v-if="selectedCatalog.description" class="catalog-panel-desc">
-                {{ selectedCatalog.description }}
-              </div>
-              <div v-if="selectedCatalog.path" class="catalog-panel-path">
-                <q-icon name="folder" size="14px" /> {{ selectedCatalog.path }}
-              </div>
-            </div>
-            <div v-else-if="items.length > 0" class="catalog-compact-title">
-              {{ selectedCatalog.name }}
-            </div>
 
-            <q-banner v-if="itemsError" dense class="error q-mb-md" rounded>
+            <q-banner v-if="itemsError && selectedCatalog.catalogType.slug !== 'music'" dense class="error q-mb-md" rounded>
               <template #avatar>
                 <q-icon name="error" color="negative" />
               </template>
               {{ itemsError }}
             </q-banner>
 
+            <MusicCatalogBrowser
+              v-if="selectedCatalog.catalogType.slug === 'music'"
+              :key="selectedCatalog.id"
+              :catalog="selectedCatalog"
+              :can-edit-catalogs="canEditCatalogs"
+              :refresh-token="musicRefreshToken"
+              @play="onPlay"
+              @edit="openItemEditor"
+              @changed="onCatalogItemChanged"
+            />
+
+            <template v-else>
+            <div class="catalog-items-layout" :class="{ 'catalog-items-layout--indexed': showCatalogAlphabetIndex }">
             <div class="movie-grid catalog-items-grid">
-              <div v-for="item in items" :key="item.id" class="movie-grid-item">
+              <div
+                v-for="item in catalogDisplayItems"
+                :key="item.id"
+                :ref="(element) => setCatalogItemElement(item.id, element)"
+                class="movie-grid-item catalog-index-target"
+                :data-catalog-initial="catalogInitial(item.title)"
+              >
                 <q-card
                   dark
                   class="movie-card full-height column"
-                  @click="openLocalDetails(item)"
+                  @click="openCatalogItemDetails(item)"
                 >
                   <div class="poster-wrap">
                     <q-img
@@ -731,13 +1097,38 @@ function onDragEnd() {
               </div>
             </div>
 
+            <nav
+              v-if="showCatalogAlphabetIndex && catalogDisplayItems.length"
+              ref="catalogAlphaIndexElement"
+              class="catalog-alpha-index"
+              :style="{
+                '--catalog-alpha-count': catalogAlphabetIndex.length,
+                '--catalog-alpha-height': catalogAlphaHeight ? `${catalogAlphaHeight}px` : undefined,
+                '--catalog-alpha-font-size': `${catalogAlphaFontSize}px`,
+              }"
+              aria-label="Jump to title initial"
+            >
+              <button
+                v-for="entry in catalogAlphabetIndex"
+                :key="entry.letter"
+                type="button"
+                :disabled="!entry.available"
+                :class="{ 'catalog-alpha-index__button--current': !catalogAlphaScrolling && catalogAlphaActiveLetter === entry.letter }"
+                :style="{ '--catalog-alpha-scale': catalogAlphaScale(entry.letter) }"
+                :aria-label="`Jump to ${entry.letter === '#' ? 'numbered titles' : entry.letter}`"
+                @click="jumpToCatalogInitial(entry.letter)"
+              >{{ entry.letter }}</button>
+            </nav>
+            </div>
+
             <div v-if="itemsLoading" class="flex flex-center q-my-xl">
               <q-spinner-dots color="primary" size="3rem" />
             </div>
 
-            <div v-if="!itemsLoading && !itemsError && items.length === 0" class="text-grey-6 text-center q-mt-lg">
+            <div v-if="!itemsLoading && !itemsError && catalogDisplayItems.length === 0" class="text-grey-6 text-center q-mt-lg">
               nothing in this library yet
             </div>
+            </template>
           </div>
           <div v-else class="coming-soon flex flex-center">
             <div class="text-center">
@@ -753,8 +1144,8 @@ function onDragEnd() {
     <CatalogItemEditDialog
       v-model:open="itemEditOpen"
       v-model:item="itemEditTarget"
-      @saved="refreshLocalMap"
-      @deleted="refreshLocalMap"
+      @saved="onCatalogItemChanged"
+      @deleted="onCatalogItemChanged"
     />
     <CatalogUploadDialog
       v-model:open="catalogUploadOpen"

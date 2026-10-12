@@ -23,6 +23,13 @@ const sourceLabel = computed(() =>
   sourceTabs.value.find((source) => source.sourceKey === props.sourceKey)?.label ??
   'Stream')
 const mediaKind = computed(() => props.kind ?? props.initialItem?.kind ?? 'music')
+const identifierLabel = computed(() => {
+  const kind = String(mediaKind.value).toLowerCase()
+  if (kind === 'podcast') return 'Episode ID'
+  if (kind === 'music') return 'Source ID'
+  if (kind === 'book' || kind === 'audiobook') return 'Provider ID'
+  return 'Source ID'
+})
 const queueItem = computed(() => details.value ? {
   ...props.initialItem,
   ...details.value,
@@ -109,6 +116,11 @@ watch([open, () => props.externalId, () => props.sourceKey], async ([isOpen, id]
                       {{ details.rating.toFixed(1) }}
                       <span class="text-grey-6">/ 10</span>
                     </span>
+                  </div>
+                  <div v-if="details.externalId" class="sheet-identifiers row q-gutter-xs">
+                    <q-chip dense outline color="grey-6" text-color="grey-4">
+                      <span class="text-weight-medium q-mr-xs">{{ identifierLabel }}:</span>{{ details.externalId }}
+                    </q-chip>
                   </div>
                 </div>
               </div>

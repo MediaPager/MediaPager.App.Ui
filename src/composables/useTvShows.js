@@ -8,6 +8,15 @@ const tvQuery = ref('')
 const tvLoading = ref(false)
 const tvError = ref('')
 const tvKeyMissing = ref(false)
+const tvGenres = ref([])
+const tvGenresLoading = ref(false)
+const tvGenreId = ref(null)
+const tvYear = ref(null)
+const tvMinRating = ref(null)
+const tvMinVoteCount = ref(null)
+const tvLanguage = ref('en')
+const tvSortBy = ref('popularity.desc')
+let tvGenresLoaded = false
 
 // Detail sheet state is shared by browse, playback, and search entry points.
 const tvSheetOpen = ref(false)
@@ -17,6 +26,7 @@ const tvSheetLoading = ref(false)
 
 export function useTvShows() {
   async function fetchTvShows() {
+    if (!tvGenresLoaded && !tvGenresLoading.value) void fetchTvGenres()
     tvLoading.value = true
     tvError.value = ''
     tvKeyMissing.value = false
@@ -25,6 +35,12 @@ export function useTvShows() {
       const { data } = await api.get('/tv-shows', {
         params: {
           ...(searchQuery ? { q: searchQuery } : {}),
+          ...(tvGenreId.value != null ? { genreId: tvGenreId.value } : {}),
+          ...(tvYear.value != null ? { year: tvYear.value } : {}),
+          ...(tvMinRating.value != null ? { minRating: tvMinRating.value } : {}),
+          ...(tvMinVoteCount.value != null ? { minVoteCount: tvMinVoteCount.value } : {}),
+          ...(tvLanguage.value ? { language: tvLanguage.value } : {}),
+          ...(tvSortBy.value !== 'popularity.desc' ? { sortBy: tvSortBy.value } : {}),
           page: tvPage.value,
         },
       })
@@ -38,6 +54,35 @@ export function useTvShows() {
     } finally {
       tvLoading.value = false
     }
+  }
+
+  async function fetchTvGenres() {
+    if (tvGenresLoaded || tvGenresLoading.value) return
+    tvGenresLoading.value = true
+    try {
+      const { data } = await api.get('/tv-shows/genres')
+      tvGenres.value = data ?? []
+      tvGenresLoaded = true
+    } catch {
+      tvGenres.value = []
+    } finally {
+      tvGenresLoading.value = false
+    }
+  }
+
+  function applyTvFilters() {
+    tvPage.value = 1
+    return fetchTvShows()
+  }
+
+  function clearTvFilters() {
+    tvGenreId.value = null
+    tvYear.value = null
+    tvMinRating.value = null
+    tvMinVoteCount.value = null
+    tvLanguage.value = 'en'
+    tvSortBy.value = 'popularity.desc'
+    return applyTvFilters()
   }
 
   function searchTv() {
@@ -86,11 +131,22 @@ export function useTvShows() {
     tvLoading,
     tvError,
     tvKeyMissing,
+    tvGenres,
+    tvGenresLoading,
+    tvGenreId,
+    tvYear,
+    tvMinRating,
+    tvMinVoteCount,
+    tvLanguage,
+    tvSortBy,
     tvSheetOpen,
     tvSheetShow,
     tvSheetDetails,
     tvSheetLoading,
     fetchTvShows,
+    fetchTvGenres,
+    applyTvFilters,
+    clearTvFilters,
     searchTv,
     goToTvPage,
     openTvDetails,

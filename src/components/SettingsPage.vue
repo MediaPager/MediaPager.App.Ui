@@ -310,7 +310,7 @@ async function sendInvite() {
           <q-tab v-for="group in visibleGroups" :key="group.name" :name="group.name" :label="group.label" :icon="group.icon" />
         </q-tabs>
 
-        <div class="settings-panel">
+        <div class="settings-panel" :class="{ 'settings-panel--plugin-ui': isPluginTab }">
           <NotFoundPage v-if="settingsTabNotFound" />
           <template v-else>
           <q-banner v-if="settingsMessage" dense class="auth-message q-mb-md">{{ settingsMessage }}</q-banner>
@@ -325,7 +325,10 @@ async function sendInvite() {
               v-for="group in visibleGroups"
               :key="group.name"
               :name="group.name"
-              :class="{ 'plugins-tab-panel': group.manage }"
+              :class="{
+                'plugins-tab-panel': group.manage,
+                'plugin-ui-tab-panel': group.pluginNav && group.uiPath,
+              }"
             >
               <div class="panel-title q-mb-md">{{ group.label }}</div>
 
@@ -638,6 +641,45 @@ async function sendInvite() {
 </template>
 
 <style scoped>
+.plugin-settings-frame {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: #0e1525;
+}
+
+.settings-panel--plugin-ui {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-panel--plugin-ui .settings-panels {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.settings-panel--plugin-ui .settings-panels :deep(.q-panel-parent),
+.settings-panel--plugin-ui .settings-panels :deep(.q-panel),
+.settings-panel--plugin-ui .settings-panels :deep(.q-tab-panel.plugin-ui-tab-panel) {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+}
+
+.settings-panel--plugin-ui .settings-panels :deep(.q-tab-panel.plugin-ui-tab-panel) {
+  display: flex;
+  flex-direction: column;
+}
+
 .plugin-settings-card {
   min-width: 420px;
   width: 480px;

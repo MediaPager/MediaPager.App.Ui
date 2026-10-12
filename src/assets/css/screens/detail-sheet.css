@@ -281,10 +281,15 @@
 }
 
 .tv-season-select-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 10px;
 }
 
 .tv-season-select {
+  flex: 0 1 320px;
   max-width: 320px;
 }
 
@@ -403,6 +408,21 @@
   color: #64748b;
 }
 
+.tv-sheet-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.tv-sheet-title-row .sheet-title {
+  margin: 0;
+}
+
+.tv-sheet-title-row .q-btn {
+  flex: 0 0 auto;
+}
+
 .tv-episode-overview {
   margin-top: 5px;
   font-size: 0.78rem;
@@ -415,13 +435,14 @@
 }
 
 .tv-episode-rating {
-  flex: 0 0 auto;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 14px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.78rem;
+  gap: 3px;
+  font: inherit;
   color: #ffaa33;
   white-space: nowrap;
+}
+
+.tv-episode-rating-separator {
+  color: #64748b;
 }
