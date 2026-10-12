@@ -18,6 +18,11 @@ const title = ref('')
 const year = ref(null)
 const musicArtist = ref('')
 const musicAlbum = ref('')
+const musicBrainzId = ref('')
+const isrc = ref('')
+const imdbId = ref('')
+const isbn = ref('')
+const podcastId = ref('')
 const overview = ref('')
 const imageUrl = ref('')
 const backdropUrl = ref('')
@@ -59,6 +64,9 @@ const metadataKind = computed(() => ({
 }[item.value?.catalogTypeSlug] ?? null))
 const isMusicItem = computed(() => metadataKind.value === 'music' && !['artist', 'album'].includes(item.value?.kind))
 const artworkLabel = computed(() => isMusicItem.value ? 'Album art' : 'Poster')
+const isVideoItem = computed(() => ['movie', 'tv'].includes(metadataKind.value))
+const isBookItem = computed(() => ['book', 'audiobook'].includes(metadataKind.value))
+const isPodcastItem = computed(() => metadataKind.value === 'podcast')
 
 // Artwork replace flow: pick the kind, then either a device file dialog or a URL to ingest.
 const fileInput = ref(null)
@@ -80,6 +88,11 @@ watch(() => open.value, (value) => {
     .map((credit) => credit.name)
     .join('; ')
   musicAlbum.value = item.value.parentTitle ?? ''
+  musicBrainzId.value = item.value.musicBrainzId ?? ''
+  isrc.value = item.value.isrc ?? ''
+  imdbId.value = item.value.imdbId ?? ''
+  isbn.value = item.value.isbn ?? ''
+  podcastId.value = item.value.externalId ?? ''
   overview.value = item.value.overview ?? ''
   imageUrl.value = item.value.imageUrl ?? ''
   backdropUrl.value = item.value.backdropUrl ?? ''
@@ -294,6 +307,10 @@ async function save() {
       ...(year.value ? { year: Number(year.value) } : { year: null }),
       ...(itemRating.value != null && itemRating.value !== '' ? { rating: Number(itemRating.value) } : {}),
       ...(isMusicItem.value ? { artist: musicArtist.value.trim(), album: musicAlbum.value.trim() } : {}),
+      ...(isMusicItem.value ? { musicBrainzId: musicBrainzId.value.trim(), isrc: isrc.value.trim() } : {}),
+      ...(isVideoItem.value ? { imdbId: imdbId.value.trim() } : {}),
+      ...(isBookItem.value ? { isbn: isbn.value.trim() } : {}),
+      ...(isPodcastItem.value ? { externalId: podcastId.value.trim() } : {}),
     }
     const updated = await updateItem(item.value.id, payload)
     if (JSON.stringify(tags.value) !== originalTagsJson.value) {
@@ -462,6 +479,17 @@ async function remove() {
                   <q-input v-model="musicAlbum" dark outlined dense label="Album" hint="Leave blank for a standalone track" />
                 </div>
               </div>
+              <div v-if="isMusicItem" class="row" style="gap: 10px">
+                <div class="col">
+                  <q-input v-model="musicBrainzId" dark outlined dense label="MusicBrainz recording ID" />
+                </div>
+                <div class="col">
+                  <q-input v-model="isrc" dark outlined dense label="ISRC" />
+                </div>
+              </div>
+              <q-input v-if="isVideoItem" v-model="imdbId" dark outlined dense label="IMDb ID" placeholder="tt1234567" />
+              <q-input v-if="isBookItem" v-model="isbn" dark outlined dense label="ISBN" placeholder="ISBN-13" />
+              <q-input v-if="isPodcastItem" v-model="podcastId" dark outlined dense label="Podcast episode ID / GUID" />
               <q-input
                 v-model="sortTitle"
                 dark
@@ -597,6 +625,7 @@ async function remove() {
   </q-dialog>
 
   <MetadataSearchDialog
+    v-if="metadataKind"
     v-model:open="metadataSearchOpen"
     :kind="metadataKind"
     :initial-query="title"

@@ -8,6 +8,15 @@ const query = ref('')
 const loading = ref(false)
 const error = ref('')
 const tmdbKeyMissing = ref(false)
+const movieGenres = ref([])
+const movieGenresLoading = ref(false)
+const movieGenreId = ref(null)
+const movieYear = ref(null)
+const movieMinRating = ref(null)
+const movieMinVoteCount = ref(null)
+const movieLanguage = ref('en')
+const movieSortBy = ref('popularity.desc')
+let movieGenresLoaded = false
 
 // Detail screen state (shared so the grid, detail sheet, and player all see it).
 const movieSheetOpen = ref(false)
@@ -18,6 +27,7 @@ const isTouchDevice = window.matchMedia('(hover: none)').matches
 
 export function useMovies() {
   async function fetchMovies() {
+    if (!movieGenresLoaded && !movieGenresLoading.value) void fetchMovieGenres()
     loading.value = true
     error.value = ''
     tmdbKeyMissing.value = false
@@ -26,6 +36,12 @@ export function useMovies() {
       const { data } = await api.get('/movies', {
         params: {
           ...(searchQuery ? { q: searchQuery } : {}),
+          ...(movieGenreId.value != null ? { genreId: movieGenreId.value } : {}),
+          ...(movieYear.value != null ? { year: movieYear.value } : {}),
+          ...(movieMinRating.value != null ? { minRating: movieMinRating.value } : {}),
+          ...(movieMinVoteCount.value != null ? { minVoteCount: movieMinVoteCount.value } : {}),
+          ...(movieLanguage.value ? { language: movieLanguage.value } : {}),
+          ...(movieSortBy.value !== 'popularity.desc' ? { sortBy: movieSortBy.value } : {}),
           page: page.value,
         },
       })
@@ -39,6 +55,35 @@ export function useMovies() {
     } finally {
       loading.value = false
     }
+  }
+
+  async function fetchMovieGenres() {
+    if (movieGenresLoaded || movieGenresLoading.value) return
+    movieGenresLoading.value = true
+    try {
+      const { data } = await api.get('/movies/genres')
+      movieGenres.value = data ?? []
+      movieGenresLoaded = true
+    } catch {
+      movieGenres.value = []
+    } finally {
+      movieGenresLoading.value = false
+    }
+  }
+
+  function applyMovieFilters() {
+    page.value = 1
+    return fetchMovies()
+  }
+
+  function clearMovieFilters() {
+    movieGenreId.value = null
+    movieYear.value = null
+    movieMinRating.value = null
+    movieMinVoteCount.value = null
+    movieLanguage.value = 'en'
+    movieSortBy.value = 'popularity.desc'
+    return applyMovieFilters()
   }
 
   function search() {
@@ -129,12 +174,23 @@ export function useMovies() {
     loading,
     error,
     tmdbKeyMissing,
+    movieGenres,
+    movieGenresLoading,
+    movieGenreId,
+    movieYear,
+    movieMinRating,
+    movieMinVoteCount,
+    movieLanguage,
+    movieSortBy,
     movieSheetOpen,
     sheetMovie,
     sheetDetails,
     sheetLoading,
     isTouchDevice,
     fetchMovies,
+    fetchMovieGenres,
+    applyMovieFilters,
+    clearMovieFilters,
     search,
     searchCast,
     goToPage,

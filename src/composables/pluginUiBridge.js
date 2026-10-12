@@ -30,8 +30,7 @@ export function validatePluginUiApiRequest(message, pluginKey) {
   const settingsPath = `/plugins/${ownKey}/settings`
   const ownActionPrefix = `/plugins/${ownKey}/actions/`
   const isSettingsRequest = url.pathname === settingsPath && ['GET', 'PUT'].includes(method)
-  const isCatalogList = pluginKey === 'mediapager.actions.example' &&
-    method === 'GET' && url.pathname === '/catalogs'
+  const isCatalogList = method === 'GET' && url.pathname === '/catalogs'
   const actionId = url.pathname.startsWith(ownActionPrefix)
     ? url.pathname.slice(ownActionPrefix.length)
     : ''

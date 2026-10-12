@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Notify } from 'quasar'
 import { api } from '../composables/useApi'
@@ -13,6 +13,7 @@ const props = defineProps({
   surface: { type: String, required: true },
   kind: { type: String, default: null },
   context: { type: Object, required: true },
+  contextResolver: { type: Function, default: null },
 })
 
 const router = useRouter()
@@ -21,6 +22,8 @@ const { activityDrawerOpen, refreshActivity } = usePluginActivity()
 const { canEditCatalogs } = useAuth()
 const { requestEditItem } = useCatalogItems()
 const EDIT_CATALOG_ITEM = 'catalog-item.edit'
+const confirmationEntry = ref(null)
+const pendingActionKey = ref(null)
 
 const kindAliases = {
   movie: 'movie', movies: 'movie',
@@ -47,6 +50,15 @@ const declaredActions = computed(() => plugins.value.flatMap((plugin) =>
     .filter((action) => action.enabled !== false)
     .filter((action) => action.scope?.toLowerCase() !== 'streamitem' || props.context.catalogItemId == null)
     .filter((action) => action.scope?.toLowerCase() !== 'libraryitem' || props.context.catalogItemId != null)
+    .filter((action) => action.scope?.toLowerCase() !== 'series' ||
+      (normalizeKind(props.kind) === 'tv' && props.context.catalogItemId == null && props.context.sourceKey != null &&
+        props.context.season == null && props.context.episode == null && props.contextResolver != null))
+    .filter((action) => action.scope?.toLowerCase() !== 'season' ||
+      (normalizeKind(props.kind) === 'tv' && props.context.catalogItemId == null && props.context.sourceKey != null &&
+        props.context.season != null && props.context.episode == null && props.contextResolver != null))
+    .filter((action) => action.scope?.toLowerCase() !== 'episode' ||
+      (normalizeKind(props.kind) === 'tv' && props.context.catalogItemId == null && props.context.sourceKey != null &&
+        props.context.season != null && props.context.episode != null))
     .filter((action) => action.hostActionId !== EDIT_CATALOG_ITEM || canEditCatalogs.value)
     .map((action) => ({ plugin, action }))))
 
@@ -78,6 +90,8 @@ const actions = computed(() => {
     (left.action.order ?? 0) - (right.action.order ?? 0) ||
     left.plugin.name.localeCompare(right.plugin.name))
 })
+const inlineActions = computed(() => actions.value.filter(({ action }) => action.position?.toLowerCase() === 'inline'))
+const positionedActions = computed(() => actions.value.filter(({ action }) => action.position?.toLowerCase() !== 'inline'))
 
 function cssPosition(position) {
   return (position ?? 'TopRight').replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`).replace(/^-/, '')
@@ -132,10 +146,37 @@ async function activate(entry) {
     return
   }
 
+  if (action.confirmationMessage) {
+    confirmationEntry.value = entry
+    return
+  }
+
+  await dispatch(entry)
+}
+
+function confirmAction() {
+  const entry = confirmationEntry.value
+  confirmationEntry.value = null
+  if (entry) void dispatch(entry)
+}
+
+async function dispatch(entry) {
+  const { plugin, action } = entry
+  const pendingKey = `${plugin.id}:${action.actionId}`
+  if (pendingActionKey.value) return
+  pendingActionKey.value = pendingKey
   try {
+    const resolvedContext = props.contextResolver
+      ? await props.contextResolver(action)
+      : actionContext.value
+    if (!resolvedContext) return
+    const context = {
+      ...resolvedContext,
+      kind: resolvedContext.kind ? normalizeKind(resolvedContext.kind) : null,
+    }
     await api.post(
       `/plugins/${encodeURIComponent(plugin.id)}/actions/${encodeURIComponent(action.actionId)}`,
-      actionContext.value,
+      context,
     )
     await refreshActivity()
     activityDrawerOpen.value = true
@@ -145,20 +186,53 @@ async function activate(entry) {
       icon: 'error',
       message: formatPluginError(error, `Could not run ${action.label}.`),
     })
+  } finally {
+    pendingActionKey.value = null
   }
 }
 </script>
 
 <template>
-  <div v-if="actions.length" class="plugin-action-buttons" :class="`plugin-actions-${surface.toLowerCase()}`">
+  <div v-if="inlineActions.length" class="plugin-action-inline-list">
     <q-btn
-      v-for="entry in actions"
+      v-for="entry in inlineActions"
+      :key="`${entry.plugin.id}:${entry.action.actionId}`"
+      :round="entry.action.showLabel !== false && !entry.action.label"
+      :outline="entry.action.showLabel === false || Boolean(entry.action.label)"
+      :label="entry.action.showLabel === false ? undefined : entry.action.label || undefined"
+      :color="entry.action.enabled === false ? 'orange' : 'grey-5'"
+      :text-color="entry.action.enabled === false ? 'dark' : 'grey-3'"
+      :loading="pendingActionKey === `${entry.plugin.id}:${entry.action.actionId}`"
+      :icon="entry.action.icon || 'extension'"
+      :aria-label="entry.action.availabilityMessage || entry.action.label"
+      :title="entry.action.availabilityMessage || entry.action.label"
+      @click.stop="activate(entry)"
+    >
+      <q-tooltip v-if="entry.action.enabled === false" class="action-availability-tooltip">
+        <div>{{ entry.action.availabilityMessage || 'Set a destination catalog to enable this action.' }}</div>
+        <router-link
+          v-if="entry.action.availabilityPluginId"
+          :to="settingsRoute(entry)"
+          class="text-primary text-weight-bold"
+          @click.stop
+        >
+          Plugin settings
+        </router-link>
+      </q-tooltip>
+      <q-tooltip v-else>{{ entry.action.label }}</q-tooltip>
+    </q-btn>
+  </div>
+
+  <div v-if="positionedActions.length" class="plugin-action-buttons" :class="`plugin-actions-${surface.toLowerCase()}`">
+    <q-btn
+      v-for="entry in positionedActions"
       :key="`${entry.plugin.id}:${entry.action.actionId}`"
       round
       unelevated
       :color="entry.action.enabled === false ? 'orange' : 'dark'"
       :text-color="entry.action.enabled === false ? 'dark' : 'primary'"
       size="sm"
+      :loading="pendingActionKey === `${entry.plugin.id}:${entry.action.actionId}`"
       :icon="entry.action.icon || 'extension'"
       :class="`plugin-action-${cssPosition(entry.action.position)}`"
       :aria-label="entry.action.availabilityMessage || entry.action.label"
@@ -180,9 +254,31 @@ async function activate(entry) {
       <q-tooltip v-else>{{ entry.action.label }}</q-tooltip>
     </q-btn>
   </div>
+
+  <q-dialog :model-value="confirmationEntry != null" persistent @hide="confirmationEntry = null">
+    <q-card dark class="plugin-action-confirmation">
+      <q-card-section class="text-h6">
+        {{ confirmationEntry?.action.confirmationTitle || 'Confirm action' }}
+      </q-card-section>
+      <q-card-section>
+        {{ confirmationEntry?.action.confirmationMessage }}
+      </q-card-section>
+      <q-card-actions align="right">
+        <q-btn flat label="Cancel" color="grey-4" v-close-popup />
+        <q-btn unelevated label="Continue" color="primary" text-color="dark" @click="confirmAction" />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
 </template>
 
 <style scoped>
+.plugin-action-inline-list {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
 .plugin-action-buttons {
   position: absolute;
   inset: 0;

@@ -26,8 +26,17 @@ const videoEl = ref(null)
 const playerPaused = ref(true)
 const playbackCurrentTime = ref(0)
 const playbackDuration = ref(0)
+const playbackVolume = ref(1)
+const playbackMuted = ref(false)
+const playbackRate = ref(1)
 let player = null
+let volumeAudioContext = null
+let volumeSourceNode = null
+let volumeGainNode = null
+let volumeGainElement = null
+let proxyUpgradePending = false
 let retryCurrentPlayback = null
+let playbackGeneration = 0
 
 // Set by the TV detail sheet while an episode plays: called when the video ends so
 // the next episode (if any) can start automatically when autoplay is enabled.
@@ -118,9 +127,20 @@ export function usePlayback() {
     }
     const params = {}
     if (season != null) { params.season = season; params.episode = episode }
-    const { data } = await api.get(
-      `/sources/${encodeURIComponent(sourceKey)}/resolve/${encodeURIComponent(externalId)}`,
-      { params })
+    if (playbackVolume.value > 1 || volumeGainNode) params.forceProxy = true
+    let data
+    try {
+      ({ data } = await api.get(
+        `/sources/${encodeURIComponent(sourceKey)}/resolve/${encodeURIComponent(externalId)}`,
+        { params }))
+    } catch (requestError) {
+      if (requestError.response?.status === 404) {
+        const error = new Error('Stream not found.')
+        error.code = 'STREAM_NOT_FOUND'
+        throw error
+      }
+      throw requestError
+    }
     // The stream must come from the API origin; the UI host would otherwise
     // serve the SPA's index.html for this path and the player can't parse it.
     return {
@@ -152,6 +172,7 @@ export function usePlayback() {
   }
 
   async function onPlay(movie, { preserveQueue = false } = {}) {
+    const generation = ++playbackGeneration
     beginPlayLoading()
     error.value = ''
     playbackError.value = ''
@@ -162,9 +183,11 @@ export function usePlayback() {
       let directPlayback = false
       if (!localItem?.storagePath && movie.catalogItemId != null) {
         localItem = await findLocalItemById(movie.catalogItemId)
+        if (generation !== playbackGeneration) return
       }
       if (!localItem?.storagePath) {
         localItem = await findLocalItemByExternalId(externalId)
+        if (generation !== playbackGeneration) return
       }
       if (movie.localOnly && !localItem?.storagePath)
         throw new Error('This catalog item has no available local media file.')
@@ -178,12 +201,13 @@ export function usePlayback() {
           sourceKey: movie.sourceKey ?? null,
           localItem,
         })
-        playerMinimized.value = false
+        playerMinimized.value = String(movie.kind ?? 'movie').toLowerCase() === 'music'
       }
 
       if (localItem?.storagePath) {
         // Catalog item that lives on disk → play the local file directly.
         const { data } = await api.post(`/catalog-items/${localItem.id}/local`)
+        if (generation !== playbackGeneration) return
         streamUrl.value = data.url
         streamType.value = data.mime ?? 'application/octet-stream'
         playingLocal.value = true
@@ -191,6 +215,7 @@ export function usePlayback() {
         // Catalog items use their TMDB `externalId`; plain TMDB movies use their own `id`.
         const tmdbId = movie.externalId ? String(movie.externalId) : String(movie.id)
         const resolved = await resolveProviderStream(tmdbId, { sourceKey: movie.sourceKey ?? null })
+        if (generation !== playbackGeneration) return
         streamUrl.value = resolved.url
         streamType.value = resolved.contentType
         directPlayback = resolved.directPlayback
@@ -215,7 +240,7 @@ export function usePlayback() {
         : { ...movie, directPlayback }
       subtitleQuery.value = currentMovie.value.title
       playerOpen.value = true
-      if (player) { await nextTick(); loadCurrentSource() }
+      if (player) { await nextTick(); await applyPlaybackVolume(); loadCurrentSource() }
       if (String(currentMovie.value.kind ?? '').toLowerCase() === 'music') {
         subtitles.value = []
         activeSub.value = null
@@ -224,19 +249,24 @@ export function usePlayback() {
         loadSubtitles()
       }
     } catch (e) {
-      error.value = formatPluginError(e)
+      if (generation !== playbackGeneration) return
+      const message = formatPluginError(e)
+      error.value = message
+      Notify.create({ type: 'negative', icon: 'error', message })
     } finally {
-      endPlayLoading()
+      if (generation === playbackGeneration) endPlayLoading()
     }
   }
 
   async function onPlayEpisode(show, season, episode, ep, { preserveQueue = false } = {}) {
+    const generation = ++playbackGeneration
     beginPlayLoading()
     error.value = ''
     playbackError.value = ''
     retryCurrentPlayback = () => onPlayEpisode(show, season, episode, ep, { preserveQueue: true })
     try {
       if (!sourcesLoaded.value) await fetchSources()
+      if (generation !== playbackGeneration) return
       const sourceKey = show?.sourceKey ?? defaultTvSourceKey.value
       if (!preserveQueue) {
         playlist.replaceQueueWithItem({
@@ -261,6 +291,7 @@ export function usePlayback() {
         episode,
         sourceKey,
       })
+      if (generation !== playbackGeneration) return
       streamUrl.value = resolved.url
       streamType.value = resolved.contentType
       playingLocal.value = false
@@ -278,16 +309,20 @@ export function usePlayback() {
         year: ep?.airDate ? String(ep.airDate).slice(0, 4) : (show.year ?? null),
       }
       playerOpen.value = true
-      if (player) { await nextTick(); loadCurrentSource() }
+      if (player) { await nextTick(); await applyPlaybackVolume(); loadCurrentSource() }
       loadSubtitles()
     } catch (e) {
-      error.value = formatPluginError(e)
+      if (generation !== playbackGeneration) return
+      const message = formatPluginError(e)
+      error.value = message
+      Notify.create({ type: 'negative', icon: 'error', message })
     } finally {
-      endPlayLoading()
+      if (generation === playbackGeneration) endPlayLoading()
     }
   }
 
   async function onPlaySourceItem(item, sourceKey, { preserveQueue = false } = {}) {
+    const generation = ++playbackGeneration
     beginPlayLoading()
     error.value = ''
     playbackError.value = ''
@@ -302,6 +337,7 @@ export function usePlayback() {
           : localItemFor(externalId)
       if (!localItem?.storagePath && item.catalogItemId != null)
         localItem = await findLocalItemById(item.catalogItemId)
+      if (generation !== playbackGeneration) return
       if (!localItem?.storagePath)
       {
         try {
@@ -310,6 +346,7 @@ export function usePlayback() {
           // A failed local lookup should not prevent a source-backed result from streaming.
         }
       }
+      if (generation !== playbackGeneration) return
       if (item.localOnly && !localItem?.storagePath)
         throw new Error('This catalog item has no available local media file.')
 
@@ -323,18 +360,20 @@ export function usePlayback() {
           sourceKey,
           kind: item.kind ?? 'music',
         })
-        playerMinimized.value = false
+        playerMinimized.value = String(item.kind ?? 'music').toLowerCase() === 'music'
       }
 
       let directPlayback = false
       if (localItem?.storagePath) {
         const { data } = await api.post(`/catalog-items/${localItem.id}/local`)
+        if (generation !== playbackGeneration) return
         streamUrl.value = data.url
         streamType.value = data.mime ?? 'application/octet-stream'
         playingLocal.value = true
         directPlayback = true
       } else {
         const resolved = await resolveProviderStream(externalId, { sourceKey })
+        if (generation !== playbackGeneration) return
         streamUrl.value = resolved.url
         streamType.value = resolved.contentType
         playingLocal.value = false
@@ -365,23 +404,23 @@ export function usePlayback() {
         subtitlePanelOpen.value = false
       }
       playerOpen.value = true
-      if (player) { await nextTick(); loadCurrentSource() }
+      if (player) { await nextTick(); await applyPlaybackVolume(); loadCurrentSource() }
       if (String(item.kind ?? '').toLowerCase() !== 'music') loadSubtitles()
     } catch (requestError) {
+      if (generation !== playbackGeneration) return
       const message = formatPluginError(requestError)
       error.value = message
       Notify.create({ type: 'negative', icon: 'error', message })
     } finally {
-      endPlayLoading()
+      if (generation === playbackGeneration) endPlayLoading()
     }
   }
 
   async function initPlayer() {
     await nextTick()
     player = videojs(videoEl.value, {
-      controls: true,
+      controls: false,
       fill: true,
-      playbackRates: [0.5, 1, 1.25, 1.5, 2],
       html5: { vhs: { overrideNative: true } },
     })
     player.on('ended', () => {
@@ -400,6 +439,15 @@ export function usePlayback() {
     })
     player.on('play', () => { playerPaused.value = false })
     player.on('pause', () => { playerPaused.value = true })
+    player.on('volumechange', () => {
+      playbackVolume.value = volumeGainNode && volumeGainElement === videoEl.value
+        ? volumeGainNode.gain.value
+        : player?.volume?.() ?? playbackVolume.value
+      playbackMuted.value = player?.muted?.() ?? playbackMuted.value
+    })
+    player.on('ratechange', () => {
+      playbackRate.value = player?.playbackRate?.() ?? playbackRate.value
+    })
     player.on('timeupdate', updatePlaybackMetrics)
     player.on('durationchange', updatePlaybackMetrics)
     window.removeEventListener('keydown', onPlayerKeydown)
@@ -407,8 +455,13 @@ export function usePlayback() {
     // Autoplay: the click that opened the player counts as a user gesture, so try
     // with sound first and fall back to muted if the browser blocks it.
     player.ready(() => {
-      loadCurrentSource()
-      if (isTouchDevice && !streamType.value.startsWith('audio/')) player.requestFullscreen?.()
+      player.muted(playbackMuted.value)
+      player.playbackRate(playbackRate.value)
+      void applyPlaybackVolume().finally(() => {
+        if (!player) return
+        loadCurrentSource()
+        if (isTouchDevice && !streamType.value.startsWith('audio/')) player.requestFullscreen?.()
+      })
     })
   }
 
@@ -438,9 +491,154 @@ export function usePlayback() {
     player.currentTime(Number.isFinite(duration) ? Math.max(0, Math.min(duration, Number(time))) : Math.max(0, Number(time)))
   }
 
+  async function ensureVolumeAmplifier() {
+    const video = videoEl.value
+    if (!player || !video || currentMovie.value?.directPlayback) return false
+    if (volumeGainNode && volumeGainElement === video) {
+      if (volumeAudioContext?.state === 'suspended') await volumeAudioContext.resume()
+      return true
+    }
+
+    const AudioContextConstructor = window.AudioContext ?? window.webkitAudioContext
+    if (!AudioContextConstructor) return false
+    let context
+    let source
+    let gain
+    try {
+      context = new AudioContextConstructor()
+      source = context.createMediaElementSource(video)
+      gain = context.createGain()
+      source.connect(gain)
+      gain.connect(context.destination)
+    } catch {
+      try { source?.disconnect() } catch { /* source creation failed */ }
+      if (context && context.state !== 'closed') void context.close()
+      return false
+    }
+
+    volumeAudioContext = context
+    volumeSourceNode = source
+    volumeGainNode = gain
+    volumeGainElement = video
+    if (context.state === 'suspended') {
+      try { await context.resume() } catch { /* a later playback gesture can resume it */ }
+    }
+    return true
+  }
+
+  async function applyPlaybackVolume() {
+    if (!player) return false
+    const volume = Math.max(0, Math.min(1.2, playbackVolume.value))
+    if (volume > 1 && !await ensureVolumeAmplifier()) {
+      playbackVolume.value = 1
+      player.volume(1)
+      Notify.create({ type: 'warning', message: 'Volume boost is unavailable for this stream.' })
+      return false
+    }
+
+    if (volumeGainNode && volumeGainElement === videoEl.value) {
+      player.volume(1)
+      volumeGainNode.gain.value = volume
+    } else {
+      player.volume(Math.min(volume, 1))
+    }
+    if (volume > 0 && player.muted()) player.muted(false)
+    playbackMuted.value = player.muted()
+    return true
+  }
+
+  function disposeVolumeAmplifier() {
+    try { volumeSourceNode?.disconnect() } catch { /* already disconnected */ }
+    try { volumeGainNode?.disconnect() } catch { /* already disconnected */ }
+    const context = volumeAudioContext
+    volumeAudioContext = null
+    volumeSourceNode = null
+    volumeGainNode = null
+    volumeGainElement = null
+    if (context && context.state !== 'closed') void context.close()
+  }
+
+  function setPlaybackVolume(value) {
+    if (!player || !Number.isFinite(Number(value))) return
+    const volume = Math.max(0, Math.min(1.2, Number(value)))
+    playbackVolume.value = volume
+    if (volume > 1 && currentMovie.value?.directPlayback && !volumeGainNode) {
+      if (!proxyUpgradePending && retryCurrentPlayback) {
+        proxyUpgradePending = true
+        void Promise.resolve(retryCurrentPlayback()).finally(() => { proxyUpgradePending = false })
+      }
+      return
+    }
+    void applyPlaybackVolume()
+  }
+
+  function toggleMute() {
+    if (!player) return
+    player.muted(!player.muted())
+    playbackMuted.value = player.muted()
+  }
+
+  function setPlaybackRate(value) {
+    if (!player || !Number.isFinite(Number(value))) return
+    const rate = Number(value)
+    player.playbackRate(rate)
+    playbackRate.value = rate
+  }
+
+  async function toggleFullscreen() {
+    if (!player) return
+    try {
+      if (player.isFullscreen()) await player.exitFullscreen()
+      else await player.requestFullscreen()
+    } catch {
+      // Some platforms block fullscreen outside a direct user gesture.
+    }
+  }
+
   function togglePlayerMinimized() {
     playerMinimized.value = !playerMinimized.value
     nextTick(() => player?.trigger('resize'))
+  }
+
+  async function restorePlayerAndEnterFullscreen() {
+    playerMinimized.value = false
+    await nextTick()
+    if (!player) return
+    player.trigger('resize')
+    await toggleFullscreen()
+  }
+
+  function stopPlayback() {
+    if (playLoadingTimer) { clearTimeout(playLoadingTimer); playLoadingTimer = null }
+    playLoading.value = false
+    try {
+      player?.pause()
+      player?.reset()
+    } catch {
+      // Disposal below still releases the player if the current source is already invalid.
+    }
+    playerOpen.value = false
+    playerMinimized.value = false
+    currentMovie.value = null
+    error.value = ''
+    playbackError.value = ''
+    streamUrl.value = ''
+    streamType.value = 'application/vnd.apple.mpegurl'
+    playingLocal.value = false
+    playerPaused.value = true
+    playbackCurrentTime.value = 0
+    playbackDuration.value = 0
+    retryCurrentPlayback = null
+    subtitles.value = []
+    activeSub.value = null
+    subtitlePanelOpen.value = false
+    subtitleQuery.value = ''
+    subtitleError.value = ''
+    subsLoading.value = false
+    subtitleTitleSearchActive.value = false
+    clearAppliedSubtitleTracks()
+    setTvNextHandler(null)
+    playlist.clearQueue()
   }
 
   async function playQueueItem(index) {
@@ -575,6 +773,8 @@ export function usePlayback() {
     window.removeEventListener('keydown', onPlayerKeydown)
     if (playLoadingTimer) { clearTimeout(playLoadingTimer); playLoadingTimer = null }
     playLoading.value = false
+    proxyUpgradePending = false
+    disposeVolumeAmplifier()
     player?.dispose()
     player = null
     retryCurrentPlayback = null
@@ -717,10 +917,15 @@ export function usePlayback() {
     playerPaused,
     playbackCurrentTime,
     playbackDuration,
+    playbackVolume,
+    playbackMuted,
+    playbackRate,
     queue: playlist.queue,
     savedPlaylists: playlist.savedPlaylists,
     activePlaylistId: playlist.activePlaylistId,
     currentIndex: playlist.currentIndex,
+    hasNext: playlist.hasNext,
+    hasPrevious: playlist.hasPrevious,
     currentQueueItem: playlist.currentItem,
     currentPlaylistName: playlist.currentPlaylistName,
     playlistDrawerOpen: playlist.playlistDrawerOpen,
@@ -757,7 +962,13 @@ export function usePlayback() {
     playPreviousInQueue,
     togglePlayback,
     seekPlayback,
+    setPlaybackVolume,
+    toggleMute,
+    setPlaybackRate,
+    toggleFullscreen,
     togglePlayerMinimized,
+    restorePlayerAndEnterFullscreen,
+    stopPlayback,
     resolveProviderStream,
     setTvNextHandler,
     initPlayer,

@@ -41,7 +41,6 @@ export function useStreamTabs() {
   const sourceTabs = computed(() => discoveredSourceTabs.value.filter((source) =>
     source.pluginId == null || onlinePluginIds.value.has(source.pluginId)))
 
-  const streamTabs = computed(() => builtinStreamTabs)
   const availableStreamKinds = computed(() => {
     const declared = onlineStreamPlugins.value.flatMap((plugin) =>
       Array.isArray(plugin.supportedCatalogTypes)
@@ -52,6 +51,7 @@ export function useStreamTabs() {
     )
     return new Set(declared.filter(Boolean))
   })
+  const streamTabs = computed(() => builtinStreamTabs.filter((tab) => availableStreamKinds.value.has(tab.key)))
   const activeMediaKind = computed(() => {
     if (!streamTab.value.startsWith('source:')) return streamTab.value
     const source = sourceTabs.value.find((entry) => entry.key === streamTab.value)

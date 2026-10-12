@@ -15,6 +15,7 @@ const props = defineProps({
   playlistItemHandler: { type: Function, default: null },
   queueItem: { type: Object, default: null },
   actionContext: { type: Object, default: null },
+  contextResolver: { type: Function, default: null },
   compact: { type: Boolean, default: false },
 })
 
@@ -58,6 +59,7 @@ async function openPlaylistPicker() {
       surface="DetailScreen"
       :kind="kind"
       :context="actionContext"
+      :context-resolver="contextResolver"
     />
     <AddToPlaylistDialog v-model="addPlaylistOpen" :item="playlistItem" />
   </div>
