@@ -220,6 +220,7 @@ function searchQueueItem(hit) {
     catalogItemId: hit.catalogItemId ?? null,
     kind: hit.kind,
     sourceKey,
+    localOnly: hit.catalogItemId != null,
     artworkUrl: hit.artworkUrl ?? null,
   }
 }
@@ -227,6 +228,7 @@ function searchQueueItem(hit) {
 function playSearchHit(hit) {
   closeTypeahead()
   const item = searchQueueItem(hit)
+  if (item.localOnly) return onPlay({ ...item, sourceKey: null })
   if (item.sourceKey) return onPlaySourceItem(item, item.sourceKey)
   if (hit.kind === 'movie' || hit.kind === 'tv') return onPlay({ ...item, sourceKey: null })
 

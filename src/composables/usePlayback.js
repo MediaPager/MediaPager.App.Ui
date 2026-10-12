@@ -166,6 +166,8 @@ export function usePlayback() {
       if (!localItem?.storagePath) {
         localItem = await findLocalItemByExternalId(externalId)
       }
+      if (movie.localOnly && !localItem?.storagePath)
+        throw new Error('This catalog item has no available local media file.')
       if (!preserveQueue) {
         playlist.replaceQueueWithItem({
           ...movie,
@@ -183,7 +185,7 @@ export function usePlayback() {
         // Catalog item that lives on disk → play the local file directly.
         const { data } = await api.post(`/catalog-items/${localItem.id}/local`)
         streamUrl.value = data.url
-        streamType.value = 'video/mp4'
+        streamType.value = data.mime ?? 'application/octet-stream'
         playingLocal.value = true
       } else {
         // Catalog items use their TMDB `externalId`; plain TMDB movies use their own `id`.
@@ -202,12 +204,25 @@ export function usePlayback() {
             title: localItem.title ?? movie.title,
             year: localItem.year ?? movie.year,
             overview: localItem.overview ?? movie.overview,
+            posterUrl: localItem.imageUrl ?? movie.posterUrl ?? movie.artworkUrl ?? null,
+            artworkUrl: localItem.imageUrl ?? movie.artworkUrl ?? movie.posterUrl ?? null,
+            artist: localItem.musicArtistCredits
+              ?.filter(credit => credit.role === 'artist')
+              .map(credit => credit.name)
+              .join(', ') || movie.artist,
+            album: localItem.parentTitle ?? movie.album,
           }
         : { ...movie, directPlayback }
       subtitleQuery.value = currentMovie.value.title
       playerOpen.value = true
       if (player) { await nextTick(); loadCurrentSource() }
-      loadSubtitles()
+      if (String(currentMovie.value.kind ?? '').toLowerCase() === 'music') {
+        subtitles.value = []
+        activeSub.value = null
+        subtitlePanelOpen.value = false
+      } else {
+        loadSubtitles()
+      }
     } catch (e) {
       error.value = formatPluginError(e)
     } finally {
@@ -280,23 +295,68 @@ export function usePlayback() {
     try {
       const externalId = String(item.externalId ?? item.id ?? '')
       if (!externalId) throw new Error('This source item has no provider ID.')
+      let localItem = item.storagePath
+        ? item
+        : item.localItem?.storagePath
+          ? item.localItem
+          : localItemFor(externalId)
+      if (!localItem?.storagePath && item.catalogItemId != null)
+        localItem = await findLocalItemById(item.catalogItemId)
+      if (!localItem?.storagePath)
+      {
+        try {
+          localItem = await findLocalItemByExternalId(externalId)
+        } catch {
+          // A failed local lookup should not prevent a source-backed result from streaming.
+        }
+      }
+      if (item.localOnly && !localItem?.storagePath)
+        throw new Error('This catalog item has no available local media file.')
+
       if (!preserveQueue) {
-        playlist.replaceQueueWithItem({ ...item, externalId, sourceKey, kind: item.kind ?? 'music' })
+        playlist.replaceQueueWithItem({
+          ...item,
+          externalId,
+          id: localItem?.id ?? item.id ?? externalId,
+          catalogItemId: localItem?.id ?? item.catalogItemId ?? null,
+          localItem,
+          sourceKey,
+          kind: item.kind ?? 'music',
+        })
         playerMinimized.value = false
       }
 
-      const resolved = await resolveProviderStream(externalId, { sourceKey })
-      streamUrl.value = resolved.url
-      streamType.value = resolved.contentType
-      playingLocal.value = false
+      let directPlayback = false
+      if (localItem?.storagePath) {
+        const { data } = await api.post(`/catalog-items/${localItem.id}/local`)
+        streamUrl.value = data.url
+        streamType.value = data.mime ?? 'application/octet-stream'
+        playingLocal.value = true
+        directPlayback = true
+      } else {
+        const resolved = await resolveProviderStream(externalId, { sourceKey })
+        streamUrl.value = resolved.url
+        streamType.value = resolved.contentType
+        playingLocal.value = false
+        directPlayback = resolved.directPlayback
+      }
       currentMovie.value = {
         ...item,
-        id: externalId,
+        id: localItem?.id ?? externalId,
+        catalogItemId: localItem?.id ?? item.catalogItemId ?? null,
         externalId,
         kind: item.kind,
-        directPlayback: resolved.directPlayback,
-        title: item.title ?? externalId,
-        posterUrl: item.posterUrl ?? item.artworkUrl ?? null,
+        directPlayback,
+        title: localItem?.title ?? item.title ?? externalId,
+        year: localItem?.year ?? item.year,
+        overview: localItem?.overview ?? item.overview,
+        posterUrl: localItem?.imageUrl ?? item.posterUrl ?? item.artworkUrl ?? null,
+        artworkUrl: localItem?.imageUrl ?? item.artworkUrl ?? null,
+        artist: localItem?.musicArtistCredits
+          ?.filter(credit => credit.role === 'artist')
+          .map(credit => credit.name)
+          .join(', ') || item.artist,
+        album: localItem?.parentTitle ?? item.album,
       }
       subtitleQuery.value = currentMovie.value.title
       if (String(item.kind ?? '').toLowerCase() === 'music') {

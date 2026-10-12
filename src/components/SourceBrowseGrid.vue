@@ -33,7 +33,13 @@ function openDetails(item) {
 }
 
 function playItem(item) {
-  return onPlaySourceItem({ ...item, kind: item.kind ?? props.kind ?? 'music' }, props.sourceKey)
+  const localItem = localItemFor(item.externalId)
+  return onPlaySourceItem({
+    ...item,
+    kind: item.kind ?? props.kind ?? 'music',
+    localItem,
+    catalogItemId: localItem?.id ?? item.catalogItemId ?? null,
+  }, props.sourceKey)
 }
 
 function metadataSummary(metadata) {

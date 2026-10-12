@@ -16,6 +16,8 @@ const { updateItem, uploadItemArtwork, ingestItemArtwork, deleteItem, saveTags }
 
 const title = ref('')
 const year = ref(null)
+const musicArtist = ref('')
+const musicAlbum = ref('')
 const overview = ref('')
 const imageUrl = ref('')
 const backdropUrl = ref('')
@@ -55,6 +57,8 @@ const metadataKind = computed(() => ({
   audiobooks: 'audiobook',
   books: 'book',
 }[item.value?.catalogTypeSlug] ?? null))
+const isMusicItem = computed(() => metadataKind.value === 'music' && !['artist', 'album'].includes(item.value?.kind))
+const artworkLabel = computed(() => isMusicItem.value ? 'Album art' : 'Poster')
 
 // Artwork replace flow: pick the kind, then either a device file dialog or a URL to ingest.
 const fileInput = ref(null)
@@ -71,6 +75,11 @@ watch(() => open.value, (value) => {
   if (!value || !item.value) return
   title.value = item.value.title ?? ''
   year.value = item.value.year ?? null
+  musicArtist.value = (item.value.musicArtistCredits ?? [])
+    .filter((credit) => credit.role === 'artist')
+    .map((credit) => credit.name)
+    .join('; ')
+  musicAlbum.value = item.value.parentTitle ?? ''
   overview.value = item.value.overview ?? ''
   imageUrl.value = item.value.imageUrl ?? ''
   backdropUrl.value = item.value.backdropUrl ?? ''
@@ -169,7 +178,7 @@ async function applyMetadata() {
   }
 }
 
-const kindLabel = (kind) => (kind === 'poster' ? 'poster' : 'backdrop')
+const kindLabel = (kind) => (kind === 'poster' ? artworkLabel.value.toLowerCase() : 'backdrop')
 
 function askReplace(kind) {
   replaceKind.value = kind
@@ -282,8 +291,9 @@ async function save() {
       originalAvailableAt: originalAvailableAt.value || '',
       contentRating: contentRating.value.trim() || '',
       ...(overview.value ? { overview: overview.value.trim() } : { overview: '' }),
-      ...(year.value ? { year } : { year: null }),
+      ...(year.value ? { year: Number(year.value) } : { year: null }),
       ...(itemRating.value != null && itemRating.value !== '' ? { rating: Number(itemRating.value) } : {}),
+      ...(isMusicItem.value ? { artist: musicArtist.value.trim(), album: musicAlbum.value.trim() } : {}),
     }
     const updated = await updateItem(item.value.id, payload)
     if (JSON.stringify(tags.value) !== originalTagsJson.value) {
@@ -317,7 +327,7 @@ async function remove() {
   <q-dialog v-model="open">
     <q-card dark class="auth-card item-dialog-card">
       <div class="row items-center justify-between q-mb-sm">
-        <div class="auth-title q-mb-none">Edit item</div>
+        <div class="auth-title q-mb-none">{{ isMusicItem ? 'Edit music metadata' : 'Edit item' }}</div>
         <q-btn
           v-if="metadataKind"
           flat
@@ -351,12 +361,12 @@ async function remove() {
             <div class="column" style="gap: 16px">
               <div class="row item-art-row" style="gap: 10px">
                 <div class="col">
-                  <div class="item-art-label">Poster</div>
+                  <div class="item-art-label">{{ artworkLabel }}</div>
                   <div class="item-art-wrap">
                     <q-img :src="imageUrl || undefined" fit="cover" class="item-art-preview">
                       <template #error>
                         <div class="flex flex-center item-art-fallback">
-                          <q-icon name="movie" size="1.6rem" color="grey-6" />
+                          <q-icon :name="isMusicItem ? 'album' : 'movie'" size="1.6rem" color="grey-6" />
                         </div>
                       </template>
                     </q-img>
@@ -369,7 +379,7 @@ async function remove() {
                       icon="swap_horiz"
                       size="sm"
                       class="art-btn art-btn-replace"
-                      title="Replace poster"
+                      :title="`Replace ${artworkLabel.toLowerCase()}`"
                       :loading="uploading === 'poster'"
                       @click="askReplace('poster')"
                     />
@@ -382,7 +392,7 @@ async function remove() {
                       icon="delete_outline"
                       size="sm"
                       class="art-btn art-btn-clear"
-                      title="Remove poster"
+                      :title="`Remove ${artworkLabel.toLowerCase()}`"
                       :disable="!imageUrl"
                       @click="clearArtwork('poster')"
                     />
@@ -434,7 +444,22 @@ async function remove() {
                   <q-input v-model="title" dark outlined dense label="Title (rename)" required hint="Displayed in the catalog; the file on disk stays untouched" />
                 </div>
                 <div class="col-6 col-sm-4">
-                  <q-input v-model.number="year" dark outlined dense type="number" label="Year (optional)" :min="1800" :max="2200" />
+                  <q-input v-model.number="year" dark outlined dense type="number" :label="isMusicItem ? 'Year released' : 'Year (optional)'" :min="1800" :max="2200" />
+                </div>
+              </div>
+              <div v-if="isMusicItem" class="row" style="gap: 10px">
+                <div class="col">
+                  <q-input
+                    v-model="musicArtist"
+                    dark
+                    outlined
+                    dense
+                    label="Artist(s)"
+                    hint="Separate multiple credited artists with semicolons"
+                  />
+                </div>
+                <div class="col">
+                  <q-input v-model="musicAlbum" dark outlined dense label="Album" hint="Leave blank for a standalone track" />
                 </div>
               </div>
               <q-input
