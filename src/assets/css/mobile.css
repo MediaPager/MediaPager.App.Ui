@@ -67,7 +67,11 @@
   }
 
   .home-page {
-    height: calc(100vh - 100px);
+    height: calc(100dvh - 100px);
+  }
+
+  .home-panel.home-panel--catalog {
+    padding-top: 4px;
   }
 
   .side-nav-col {

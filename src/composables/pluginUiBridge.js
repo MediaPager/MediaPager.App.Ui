@@ -30,13 +30,12 @@ export function validatePluginUiApiRequest(message, pluginKey) {
   const settingsPath = `/plugins/${ownKey}/settings`
   const ownActionPrefix = `/plugins/${ownKey}/actions/`
   const isSettingsRequest = url.pathname === settingsPath && ['GET', 'PUT'].includes(method)
-  const isDownloadsCatalogList = pluginKey === 'mediapager.actions.downloads' &&
-    method === 'GET' && url.pathname === '/catalogs'
+  const isCatalogList = method === 'GET' && url.pathname === '/catalogs'
   const actionId = url.pathname.startsWith(ownActionPrefix)
     ? url.pathname.slice(ownActionPrefix.length)
     : ''
   const isOwnAction = method === 'POST' && /^[a-zA-Z0-9._-]{1,128}$/.test(actionId)
-  if (!isSettingsRequest && !isDownloadsCatalogList && !isOwnAction) return null
+  if (!isSettingsRequest && !isCatalogList && !isOwnAction) return null
 
   if (message.body != null) {
     if (method === 'GET' || typeof message.body !== 'object' || Array.isArray(message.body)) return null
@@ -46,6 +45,6 @@ export function validatePluginUiApiRequest(message, pluginKey) {
   let body
   try { body = message.body == null ? undefined : JSON.stringify(message.body) } catch { return null }
   if (body && body.length > 64 * 1024) return null
-  if (isDownloadsCatalogList) return { method, path: url.pathname, body, catalogList: true }
+  if (isCatalogList) return { method, path: url.pathname, body, catalogList: true }
   return { method, path: url.pathname, body }
 }

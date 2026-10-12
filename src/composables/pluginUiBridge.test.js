@@ -6,12 +6,12 @@ import {
   validatePluginUiApiRequest,
 } from './pluginUiBridge.js'
 
-const pluginId = 'mediapager.actions.downloads'
+const pluginId = 'mediapager.actions.sample'
 
 test('packaged UI uses the host-served plugin asset path', () => {
   assert.equal(
     buildPluginUiUrl(pluginId, 'settings/index.html', 'https://app.example'),
-    'https://app.example/plugins/mediapager.actions.downloads/ui/settings/index.html',
+    'https://app.example/plugins/mediapager.actions.sample/ui/settings/index.html',
   )
   assert.equal(externalPluginUiUrl('/settings/index.html'), null)
 })
@@ -22,7 +22,7 @@ test('only HTTPS external UI URLs are loaded, without enabling the bridge', () =
   assert.equal(externalPluginUiUrl('https://user:pass@plugins.example/ui/'), 'about:blank')
 })
 
-test('bridge allows this plugin settings/actions and Downloads catalog-picker data', () => {
+test('bridge allows this plugin settings/actions and sanitized catalog-picker data', () => {
   assert.deepEqual(validatePluginUiApiRequest({
     method: 'GET', url: `/plugins/${pluginId}/settings`,
   }, pluginId), { method: 'GET', path: `/plugins/${pluginId}/settings`, body: undefined })
@@ -32,17 +32,19 @@ test('bridge allows this plugin settings/actions and Downloads catalog-picker da
   }, pluginId), { method: 'PUT', path: `/plugins/${pluginId}/settings`, body: '{"output":"/library"}' })
 
   assert.deepEqual(validatePluginUiApiRequest({
-    method: 'POST', url: `/plugins/${pluginId}/actions/start-download`, body: { externalId: '42' },
+    method: 'POST', url: `/plugins/${pluginId}/actions/run`, body: { externalId: '42' },
   }, pluginId), {
-    method: 'POST', path: `/plugins/${pluginId}/actions/start-download`, body: '{"externalId":"42"}',
+    method: 'POST', path: `/plugins/${pluginId}/actions/run`, body: '{"externalId":"42"}',
   })
 })
 
-test('only the Downloads plugin can request the read-only catalog picker data', () => {
+test('plugin UIs can request only the sanitized read-only catalog picker data', () => {
   assert.deepEqual(validatePluginUiApiRequest({ method: 'GET', url: '/catalogs' }, pluginId), {
     method: 'GET', path: '/catalogs', body: undefined, catalogList: true,
   })
-  assert.equal(validatePluginUiApiRequest({ method: 'GET', url: '/catalogs' }, 'mediapager.stream.vidsrc'), null)
+  assert.deepEqual(validatePluginUiApiRequest({ method: 'GET', url: '/catalogs' }, 'mediapager.stream.sample'), {
+    method: 'GET', path: '/catalogs', body: undefined, catalogList: true,
+  })
 })
 
 test('bridge rejects other plugins, arbitrary APIs, URL overrides, and unsafe methods', () => {

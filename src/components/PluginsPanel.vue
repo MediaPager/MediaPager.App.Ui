@@ -26,6 +26,7 @@ const disablingId = ref('')
 const enablingId = ref('')
 const confirmTarget = ref(null)
 const removeUnusedDependencies = ref(false)
+let apiRestartTimer = null
 
 const CATEGORY_ORDER = ['search', 'subtitles', 'email', 'metadata', 'stream', 'interface', 'actions', 'other']
 const PLUGIN_TYPES = ['search', 'subtitles', 'email', 'metadata', 'stream', 'interface', 'actions']
@@ -107,7 +108,10 @@ const visibleGroups = computed(() => {
 })
 
 onMounted(load)
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+  if (apiRestartTimer) clearTimeout(apiRestartTimer)
+})
 
 async function load() {
   loading.value = true
@@ -138,6 +142,10 @@ async function uninstall(plugin) {
       params: { removeDependencies: removeUnusedDependencies.value },
     })
     message.value = data?.message ?? `Turned off ${plugin.name}.`
+    if (data?.restarting) {
+      retryAfterApiRestart()
+      return
+    }
     await load()
     fetchSources()
   } catch (requestError) {
@@ -145,6 +153,19 @@ async function uninstall(plugin) {
   } finally {
     uninstallingId.value = ''
   }
+}
+
+function retryAfterApiRestart(attempt = 0) {
+  if (apiRestartTimer) clearTimeout(apiRestartTimer)
+  apiRestartTimer = setTimeout(async () => {
+    await load()
+    if (error.value) {
+      if (attempt < 40) retryAfterApiRestart(attempt + 1)
+      else error.value = 'The API has not restarted yet. Refresh Plugins after the host is back.'
+      return
+    }
+    fetchSources()
+  }, 500)
 }
 
 function askUninstall(plugin) {

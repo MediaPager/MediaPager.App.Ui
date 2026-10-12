@@ -16,6 +16,10 @@ const originalAvailableAt = ref('')
 const contentRating = ref('')
 const rating = ref(null)
 const externalId = ref('')
+const imdbId = ref('')
+const isbn = ref('')
+const musicBrainzId = ref('')
+const isrc = ref('')
 const imageUrl = ref('')
 const backdropUrl = ref('')
 const genres = ref([])
@@ -52,6 +56,10 @@ watch(open, (isOpen) => {
   contentRating.value = ''
   rating.value = null
   externalId.value = ''
+  imdbId.value = ''
+  isbn.value = ''
+  musicBrainzId.value = ''
+  isrc.value = ''
   imageUrl.value = ''
   backdropUrl.value = ''
   genres.value = []
@@ -107,6 +115,10 @@ async function upload() {
   appendIfSet(form, 'contentRating', contentRating.value)
   appendIfSet(form, 'rating', rating.value)
   appendIfSet(form, 'externalId', externalId.value)
+  appendIfSet(form, 'imdbId', imdbId.value)
+  appendIfSet(form, 'isbn', isbn.value)
+  appendIfSet(form, 'musicBrainzId', musicBrainzId.value)
+  appendIfSet(form, 'isrc', isrc.value)
   appendIfSet(form, 'imageUrl', imageUrl.value)
   appendIfSet(form, 'backdropUrl', backdropUrl.value)
   for (const genre of genres.value) form.append('genres', genre)
@@ -163,6 +175,13 @@ async function upload() {
         </q-file>
 
         <q-input v-model="title" dark outlined dense label="Title" required />
+        <q-input v-if="metadataKind === 'movie' || metadataKind === 'tv'" v-model="imdbId" dark outlined dense label="IMDb ID" placeholder="tt1234567" />
+        <div v-if="metadataKind === 'music'" class="row q-col-gutter-sm">
+          <div class="col"><q-input v-model="musicBrainzId" dark outlined dense label="MusicBrainz recording ID" /></div>
+          <div class="col"><q-input v-model="isrc" dark outlined dense label="ISRC" /></div>
+        </div>
+        <q-input v-if="metadataKind === 'book' || metadataKind === 'audiobook'" v-model="isbn" dark outlined dense label="ISBN" placeholder="ISBN-13" />
+        <q-input v-if="metadataKind === 'podcast'" v-model="externalId" dark outlined dense label="Episode ID / GUID" />
         <div class="row q-col-gutter-sm">
           <div class="col-4">
             <q-input v-model.number="year" dark outlined dense type="number" label="Year" :min="1800" :max="2200" />

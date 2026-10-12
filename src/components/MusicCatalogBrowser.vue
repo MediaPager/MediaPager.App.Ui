@@ -17,13 +17,18 @@ const tabs = [
   { name: 'albums', label: 'Albums', icon: 'album' },
   { name: 'unorganized', label: 'Needs organization', icon: 'playlist_remove' },
 ]
-const sortOptions = [
+const trackSortOptions = [
   { label: 'Title', value: 'title' },
   { label: 'Artist', value: 'artist' },
   { label: 'Album', value: 'album' },
   { label: 'Year', value: 'year' },
   { label: 'Recently added', value: 'recent' },
 ]
+const albumSortOptions = [
+  { label: 'Artist', value: 'artist' },
+  { label: 'Recently added', value: 'recent' },
+]
+const artistSortOptions = [{ label: 'Recently added', value: 'recent' }]
 
 const libraryTab = ref('songs')
 const artist = ref(null)
@@ -33,6 +38,7 @@ const search = ref('')
 const genre = ref(null)
 const year = ref(null)
 const sort = ref('title')
+const songViewMode = ref('songs')
 const page = ref(1)
 const pageSize = 75
 const totalPages = ref(1)
@@ -56,6 +62,9 @@ const level = computed(() => {
 })
 const parentId = computed(() => album.value?.id ?? artist.value?.id ?? null)
 const isTrackView = computed(() => level.value === 'track' || level.value === 'unorganized')
+const sortOptions = computed(() => level.value === 'artist'
+  ? artistSortOptions
+  : level.value === 'album' ? albumSortOptions : trackSortOptions)
 const visibleSelectedCount = computed(() => items.value.filter(item => selectedIds.value.includes(item.id)).length)
 const allVisibleSelected = computed(() => items.value.length > 0 && visibleSelectedCount.value === items.value.length)
 const genreOptions = computed(() => (stats.value.genres ?? []).map(item => ({ label: `${item.name} (${item.count})`, value: item.name })))
@@ -67,6 +76,7 @@ const tabLabel = (tab) => {
         : stats.value.unorganizedTracks
   return `${tab.label} · ${count ?? 0}`
 }
+const viewByOptions = computed(() => tabs.map(tab => ({ label: tabLabel(tab), value: tab.name })))
 
 watch(searchText, (value) => {
   clearTimeout(searchTimer)
@@ -79,6 +89,12 @@ watch(searchText, (value) => {
 watch([genre, year, sort], () => {
   page.value = 1
   selectedIds.value = []
+})
+watch(songViewMode, () => { selectedIds.value = [] })
+watch(level, (currentLevel) => {
+  const defaultSort = currentLevel === 'artist' ? 'recent' : currentLevel === 'album' ? 'artist' : 'title'
+  if (!sortOptions.value.some(option => option.value === sort.value)) sort.value = defaultSort
+  page.value = 1
 })
 
 watch([() => props.catalog.id, level, parentId, search, genre, year, sort, page, () => props.refreshToken], load, { immediate: true })
@@ -250,23 +266,22 @@ function playTrack(track) {
       <template #action><q-btn flat dense color="warning" label="Review tracks" @click="changeTab('unorganized')" /></template>
     </q-banner>
 
-    <q-tabs
-      :model-value="libraryTab"
-      dense
-      align="left"
-      active-color="primary"
-      indicator-color="primary"
-      class="music-library-tabs q-mb-md"
-      @update:model-value="changeTab"
-    >
-      <q-tab v-for="tab in tabs" :key="tab.name" :name="tab.name" :icon="tab.icon" :label="tabLabel(tab)" />
-    </q-tabs>
-
     <div class="music-library-toolbar row items-center q-col-gutter-sm q-mb-md">
       <div class="col-12 col-lg">
         <q-input v-model="searchText" dark outlined dense clearable label="Search songs, artists, and albums" placeholder="Search this catalog">
           <template #prepend><q-icon name="search" /></template>
         </q-input>
+      </div>
+      <div class="col-6 col-sm-4 col-lg-2">
+        <q-select
+          :model-value="libraryTab"
+          dark outlined dense emit-value map-options
+          :options="viewByOptions"
+          label="View by"
+          @update:model-value="changeTab"
+        >
+          <template #prepend><q-icon name="library_music" /></template>
+        </q-select>
       </div>
       <div class="col-6 col-sm-4 col-lg-2">
         <q-select v-model="genre" dark outlined dense clearable emit-value map-options :options="genreOptions" label="Genre">
@@ -290,13 +305,19 @@ function playTrack(track) {
         <span v-if="search"> matching “{{ search }}”</span>
       </div>
       <q-space />
-      <q-checkbox
-        v-if="isTrackView && items.length"
-        :model-value="allVisibleSelected"
+      <q-btn-toggle
+        v-if="isTrackView"
+        v-model="songViewMode"
         dense
-        color="primary"
-        label="Select page"
-        @update:model-value="toggleAllVisible"
+        unelevated
+        toggle-color="primary"
+        color="dark"
+        text-color="grey-5"
+        :options="[
+          { value: 'songs', icon: 'view_list', label: 'List' },
+          { value: 'postcards', icon: 'grid_view', label: 'Postcards' },
+        ]"
+        class="q-ml-sm"
       />
       <q-btn
         v-if="canEditCatalogs && selectedIds.length"
@@ -326,10 +347,20 @@ function playTrack(track) {
       <template #action><q-btn flat dense label="Retry" @click="load" /></template>
     </q-banner>
 
-    <div v-if="isTrackView && items.length" class="music-table-scroll">
+    <div v-if="isTrackView && items.length && songViewMode === 'songs'" class="music-table-scroll">
       <q-markup-table dark flat separator="horizontal" class="music-track-table">
         <thead>
           <tr>
+            <th class="text-center music-select-col">
+              <q-checkbox
+                :model-value="allVisibleSelected"
+                dense
+                color="primary"
+                aria-label="Select all tracks on this page"
+                title="Select all tracks on this page"
+                @update:model-value="toggleAllVisible"
+              />
+            </th>
             <th class="text-left music-track-title-col">Track</th>
             <th class="text-left">Artist</th>
             <th class="text-left">Album</th>
@@ -341,9 +372,11 @@ function playTrack(track) {
         </thead>
         <tbody>
           <tr v-for="track in items" :key="track.id" class="music-track-table-row">
+            <td class="text-center music-select-col">
+              <q-checkbox :model-value="selectedIds.includes(track.id)" dense color="primary" :aria-label="`Select ${track.title}`" @update:model-value="value => toggleSelected(track.id, value)" />
+            </td>
             <td class="music-track-title-col">
               <div class="row items-center no-wrap q-gutter-sm">
-                <q-checkbox :model-value="selectedIds.includes(track.id)" dense color="primary" @update:model-value="value => toggleSelected(track.id, value)" />
                 <q-avatar rounded size="42px" color="grey-9" text-color="grey-5">
                   <q-img v-if="track.imageUrl" :src="track.imageUrl" fit="cover" />
                   <q-icon v-else name="music_note" />
@@ -352,6 +385,7 @@ function playTrack(track) {
                   <button class="music-track-title" :disabled="!track.storagePath" @click="playTrack(track)">{{ track.title }}</button>
                   <div class="music-track-subtitle">
                     <span v-if="track.discNumber && track.trackNumber">{{ track.discNumber }}.{{ String(track.trackNumber).padStart(2, '0') }} · </span>
+                    <span v-if="track.musicBrainzId" :title="`MusicBrainz ID: ${track.musicBrainzId}`">MBID {{ track.musicBrainzId }}</span>
                     <span v-if="track.isrc">ISRC {{ track.isrc }}</span>
                     <q-badge v-if="needsMetadata(track)" color="warning" text-color="dark" label="Needs metadata" />
                   </div>
@@ -371,6 +405,31 @@ function playTrack(track) {
           </tr>
         </tbody>
       </q-markup-table>
+    </div>
+
+    <div v-else-if="isTrackView && items.length" class="music-postcard-grid">
+      <q-card v-for="track in items" :key="track.id" dark class="music-postcard">
+        <div class="music-postcard-art-wrap">
+          <q-img v-if="track.imageUrl" :src="track.imageUrl" ratio="1" fit="cover" class="music-postcard-art">
+            <template #error><div class="absolute-full flex flex-center bg-grey-10 text-grey-7"><q-icon name="music_note" size="2.5rem" /></div></template>
+          </q-img>
+          <div v-else class="music-postcard-art flex flex-center bg-grey-10 text-grey-7"><q-icon name="music_note" size="2.5rem" /></div>
+          <q-badge v-if="needsMetadata(track)" color="warning" text-color="dark" class="music-postcard-status" label="Needs metadata" />
+          <q-btn round unelevated color="primary" text-color="dark" icon="play_arrow" class="music-postcard-play" :disable="!track.storagePath" title="Play locally" @click="playTrack(track)" />
+        </div>
+        <q-card-section class="q-pa-sm">
+          <div class="music-postcard-title ellipsis">{{ track.title }}</div>
+          <div class="music-postcard-detail ellipsis">{{ artistsFor(track) }}</div>
+          <div class="music-postcard-detail ellipsis">{{ track.parentTitle ?? 'Unorganized' }}<span v-if="track.year"> · {{ track.year }}</span></div>
+          <div class="row items-center justify-between q-mt-xs">
+            <span class="music-postcard-detail">{{ durationLabel(track.durationSeconds) }}</span>
+            <div>
+              <q-btn v-if="canEditCatalogs" flat round dense color="grey-5" icon="edit" title="Edit metadata" @click="emit('edit', track)" />
+              <q-btn v-if="canEditCatalogs" flat round dense color="negative" icon="delete_outline" title="Remove from catalog" @click="removeTrack(track)" />
+            </div>
+          </div>
+        </q-card-section>
+      </q-card>
     </div>
 
     <div v-else-if="items.length" class="music-collection-grid">
@@ -491,6 +550,13 @@ function playTrack(track) {
   min-width: 290px;
   max-width: 440px;
 }
+.music-select-col {
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  padding-left: 6px !important;
+  padding-right: 6px !important;
+}
 .music-track-primary {
   min-width: 0;
 }
@@ -532,6 +598,44 @@ function playTrack(track) {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
   gap: 1rem;
+}
+.music-postcard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 14px;
+}
+.music-postcard {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: #151a21;
+}
+.music-postcard-art-wrap {
+  position: relative;
+  overflow: hidden;
+  background: #10141a;
+}
+.music-postcard-art {
+  width: 100%;
+  aspect-ratio: 1;
+}
+.music-postcard-status {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+}
+.music-postcard-play {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+}
+.music-postcard-title {
+  color: #eef2f8;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+.music-postcard-detail {
+  color: #8491a4;
+  font-size: 0.72rem;
 }
 .music-collection-card {
   overflow: hidden;

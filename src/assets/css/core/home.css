@@ -1,7 +1,11 @@
 /* ── Home screen: side nav + movie grid / cards ──────────────────────────── */
 
+:root {
+  --home-side-nav-width: 200px;
+}
+
 .home-page {
-  height: calc(100vh - 50px);
+  height: calc(100dvh - 50px);
 }
 
 .home-layout {
@@ -11,8 +15,8 @@
 }
 
 .side-nav-col {
-  width: 200px;
-  min-width: 200px;
+  width: var(--home-side-nav-width);
+  min-width: var(--home-side-nav-width);
   border-right: 1px solid #1a2333;
   background: #0b1220;
   display: flex;
@@ -157,12 +161,17 @@
 .home-panel {
   flex: 1;
   min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 16px;
 }
 
 .home-panel.home-panel--with-tabs {
   padding-top: 0;
+}
+
+.home-panel.home-panel--catalog {
+  padding-top: 8px;
 }
 
 /* ── Stream sub-tabs (slim bar above the browse area) ── */
@@ -233,7 +242,7 @@
   align-items: stretch;
   justify-content: flex-start;
   min-height: 300px;
-  padding: 16px 24px 24px;
+  padding: 8px 24px 24px;
   width: 100%;
 }
 
@@ -290,7 +299,108 @@
 
 .catalog-items-grid {
   width: 100%;
-  margin-top: 24px;
+  margin-top: 12px;
+}
+
+.catalog-toolbar--items {
+  margin-bottom: 8px;
+}
+
+.catalog-items-layout {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.catalog-items-layout--indexed {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: start;
+  gap: 10px;
+}
+
+.catalog-alpha-index {
+  position: sticky;
+  top: 18px;
+  transform: translateX(40px);
+  display: grid;
+  grid-template-rows: repeat(var(--catalog-alpha-count), minmax(0, 1fr));
+  align-items: center;
+  gap: 1px;
+  height: var(--catalog-alpha-height, calc(100dvh - 100px));
+  max-height: none;
+  box-sizing: border-box;
+  overflow: visible;
+  overscroll-behavior: contain;
+  padding: 5px 2px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 14px;
+  background: rgba(12, 17, 26, 0.98);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.32);
+}
+
+.catalog-alpha-index button {
+  width: 28px;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #c8f28a;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--catalog-alpha-font-size, 0.82rem);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transform-origin: right center;
+  scale: var(--catalog-alpha-scale, 1);
+  transition: scale 140ms cubic-bezier(0.2, 0.8, 0.2, 1), color 140ms ease, background 140ms ease;
+}
+
+.catalog-alpha-index button:hover:not(:disabled) {
+  position: relative;
+  z-index: 3;
+  scale: 1.55 1.4;
+  border-radius: 999px;
+  background: rgba(134, 212, 17, 0.2);
+  color: #fff;
+  text-shadow: 0 0 8px rgba(200, 242, 138, 0.7);
+}
+
+.catalog-alpha-index button.catalog-alpha-index__button--current:not(:disabled) {
+  background: rgba(134, 212, 17, 0.25);
+  color: #fff;
+  box-shadow: inset 3px 0 0 rgba(200, 242, 138, 0.8);
+}
+
+.catalog-alpha-index button:hover:not(:disabled) + button,
+.catalog-alpha-index button:has(+ button:hover:not(:disabled)) {
+  position: relative;
+  z-index: 2;
+  scale: 1.22 1.12;
+}
+
+.catalog-alpha-index button:hover:not(:disabled) + button + button,
+.catalog-alpha-index button:has(+ button + button:hover:not(:disabled)) {
+  position: relative;
+  z-index: 1;
+  scale: 1.08 1.04;
+}
+
+.catalog-alpha-index button:disabled {
+  color: #78869a;
+  cursor: default;
+}
+
+.catalog-alpha-index button:focus-visible {
+  outline: 1px solid #c8f28a;
+  outline-offset: -1px;
+  background: rgba(134, 212, 17, 0.2);
+}
+
+.catalog-index-target {
+  scroll-margin-top: 24px;
 }
 
 .catalog-compact-title {
@@ -306,7 +416,7 @@
 
 @media (max-width: 600px) {
   .catalog-panel {
-    padding: 12px;
+    padding: 6px 12px 12px;
   }
 
   .catalog-toolbar {
@@ -356,6 +466,26 @@
   .catalog-toolbar > .q-btn .q-btn__content {
     font-size: 0.75rem;
   }
+
+  .catalog-items-layout--indexed {
+    grid-template-columns: minmax(0, 1fr) 28px;
+    gap: 4px;
+  }
+
+  .catalog-alpha-index {
+    transform: translateX(20px);
+    border-radius: 10px;
+  }
+
+  .catalog-alpha-index button {
+    width: 22px;
+  }
+}
+
+@media (min-width: 601px) and (max-width: 700px) {
+  .catalog-alpha-index {
+    transform: translateX(32px);
+  }
 }
 
 /* ── Movie grid / cards ── */
@@ -364,6 +494,56 @@
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 210px));
   justify-content: start;
   gap: 8px;
+}
+
+.stream-filter-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: rgba(14, 21, 37, 0.74);
+  scrollbar-width: thin;
+  scrollbar-color: #435064 transparent;
+}
+
+.stream-filter-field {
+  flex: 0 0 auto;
+}
+
+.stream-filter-field--genre {
+  width: 150px;
+}
+
+.stream-filter-field--year {
+  width: 112px;
+}
+
+.stream-filter-field--rating,
+.stream-filter-field--votes {
+  width: 126px;
+}
+
+.stream-filter-field--language {
+  width: 142px;
+}
+
+.stream-filter-field--sort {
+  width: 140px;
+}
+
+.stream-filter-clear {
+  flex: 0 0 34px;
+  width: 34px;
+}
+
+.stream-filter-clear .q-btn__content {
+  min-width: 0;
 }
 
 .movie-card {

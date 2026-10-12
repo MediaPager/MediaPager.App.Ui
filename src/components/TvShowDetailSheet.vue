@@ -1,15 +1,21 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { Notify } from 'quasar'
 import { useTvShows } from '../composables/useTvShows'
 import { usePlayback } from '../composables/usePlayback'
 import { useUserSettings } from '../composables/useUserSettings'
 import { formatRuntime, useMovies } from '../composables/useMovies'
 import { useCatalogItems } from '../composables/useCatalogItems'
+import { useAuth } from '../composables/useAuth'
+import { usePlaylist } from '../composables/usePlaylist'
 import { useSources } from '../composables/useSources'
 import MediaDetailsActions from './MediaDetailsActions.vue'
+import PluginActionButtons from './PluginActionButtons.vue'
 
 const { error } = useMovies()
-const { localItemFor } = useCatalogItems()
+const { localItemFor, requestEditItem } = useCatalogItems()
+const { canEditCatalogs } = useAuth()
+const { addToQueue } = usePlaylist()
 const { defaultTvSourceKey } = useSources()
 const { currentMovie, onPlayEpisode, setTvNextHandler } = usePlayback()
 const { autoplay } = useUserSettings()
@@ -27,6 +33,38 @@ const {
 // then cached for the life of the open sheet.
 const seasonCache = ref({})
 const selectedSeason = ref(null)
+const seasonLoads = new Map()
+const localCatalogItem = computed(() => tvSheetShow.value?.localItem ?? localItemFor(tvSheetShow.value?.id))
+const seriesActionContext = computed(() => {
+  const show = tvSheetShow.value
+  if (!show) return null
+  const localItem = localCatalogItem.value
+  return {
+    catalogItemId: show.isCatalogItem ? localItem?.id ?? null : null,
+    catalogTypeId: localItem?.catalogTypeId ?? null,
+    kind: 'tv',
+    sourceKey: show.isCatalogItem ? null : show.sourceKey ?? defaultTvSourceKey.value,
+    externalId: String(show.id ?? ''),
+    title: sheetTitle(),
+    imageUrl: tvSheetDetails.value?.posterUrl ?? show.posterUrl,
+    backdropUrl: tvSheetDetails.value?.backdropUrl ?? show.backdropUrl,
+    overview: tvSheetDetails.value?.overview ?? show.overview,
+    year: Number(tvSheetDetails.value?.year ?? show.year) || null,
+  }
+})
+const seasonActionContext = computed(() => {
+  if (!seriesActionContext.value || selectedSeason.value == null) return null
+  return { ...seriesActionContext.value, season: selectedSeason.value }
+})
+const identifierFields = computed(() => {
+  const fields = []
+  const add = (label, value) => {
+    if (value != null && String(value).trim()) fields.push({ label, value: String(value) })
+  }
+  add('IMDb ID', tvSheetDetails.value?.imdbId ?? localCatalogItem.value?.imdbId)
+  add('TMDB ID', localCatalogItem.value?.externalId ?? tvSheetShow.value?.id)
+  return fields
+})
 
 const seasonOptions = computed(() =>
   (tvSheetDetails.value?.seasons ?? []).map((season) => ({
@@ -40,16 +78,21 @@ function seasonState(number) {
 }
 
 async function loadSeason(number) {
-  if (seasonCache.value[number]) return
+  if (seasonLoads.has(number)) return seasonLoads.get(number)
+  if (seasonCache.value[number] && !seasonCache.value[number].loading) return
   const showId = tvSheetShow.value?.id
   if (showId == null) return
   seasonCache.value[number] = { loading: true, episodes: [] }
-  try {
-    const data = await fetchSeason(showId, number)
-    seasonCache.value[number] = { loading: false, episodes: data.episodes }
-  } catch {
-    seasonCache.value[number] = { loading: false, episodes: [] }
-  }
+  const request = (async () => {
+    try {
+      const data = await fetchSeason(showId, number)
+      seasonCache.value[number] = { loading: false, episodes: data.episodes }
+    } catch {
+      seasonCache.value[number] = { loading: false, episodes: [] }
+    }
+  })()
+  seasonLoads.set(number, request)
+  try { await request } finally { seasonLoads.delete(number) }
 }
 
 watch(() => tvSheetShow.value?.id, () => {
@@ -82,18 +125,27 @@ function sheetRating() {
   return (tvSheetDetails.value?.voteAverage ?? tvSheetShow.value?.voteAverage).toFixed(1)
 }
 
-// Clicking an episode's still starts playback for that specific episode, and
-// registers the next-episode continuation the player fires when it ends.
-function playEpisode(ep) {
-  const show = tvSheetShow.value
-  if (!show || selectedSeason.value == null) return
-  setTvNextHandler(playNextEpisode, show.id)
-  return onPlayEpisode(show, selectedSeason.value, ep.episodeNumber, ep)
+async function editSeriesMetadata() {
+  if (!localCatalogItem.value) return
+  try {
+    await requestEditItem(localCatalogItem.value.id)
+  } catch {
+    Notify.create({ type: 'negative', icon: 'error', message: 'Could not open series metadata.' })
+  }
 }
 
-function episodeQueueItem(ep) {
+// Clicking an episode's still starts playback for that specific episode, and
+// registers the next-episode continuation the player fires when it ends.
+function playEpisode(ep, seasonNumber = selectedSeason.value) {
   const show = tvSheetShow.value
-  const season = selectedSeason.value
+  if (!show || seasonNumber == null) return
+  setTvNextHandler(playNextEpisode, show.id)
+  return onPlayEpisode(show, seasonNumber, ep.episodeNumber, ep)
+}
+
+function episodeQueueItem(ep, seasonNumber = selectedSeason.value) {
+  const show = tvSheetShow.value
+  const season = seasonNumber
   if (!show || season == null) return null
   return {
     kind: 'tv',
@@ -110,13 +162,95 @@ function episodeQueueItem(ep) {
   }
 }
 
+async function firstSeriesEpisode() {
+  const season = [...(tvSheetDetails.value?.seasons ?? [])]
+    .sort((left, right) => left.seasonNumber - right.seasonNumber)[0]
+  if (!season) return null
+  await loadSeason(season.seasonNumber)
+  const episode = seasonCache.value[season.seasonNumber]?.episodes?.[0]
+  return episode ? { episode, seasonNumber: season.seasonNumber } : null
+}
+
+async function playFirstEpisode() {
+  const first = await firstSeriesEpisode()
+  if (!first) return
+  selectedSeason.value = first.seasonNumber
+  return playEpisode(first.episode, first.seasonNumber)
+}
+
+async function queueFirstEpisode() {
+  const first = await firstSeriesEpisode()
+  if (!first) return
+  const queueItem = episodeQueueItem(first.episode, first.seasonNumber)
+  if (addToQueue(queueItem)) Notify.create({ type: 'positive', message: 'Added the first episode to the queue.' })
+}
+
+async function firstEpisodePlaylistItem() {
+  const first = await firstSeriesEpisode()
+  return first ? episodeQueueItem(first.episode, first.seasonNumber) : null
+}
+
+function episodeActionMetadata(season, episode) {
+  return {
+    label: 'series-episode',
+    value: JSON.stringify({
+      seasonNumber: season.seasonNumber,
+      episodeNumber: episode.episodeNumber,
+      title: episode.title,
+      imageUrl: episode.stillUrl,
+      overview: episode.overview,
+      year: Number(episode.airDate?.slice?.(0, 4)) || tvSheetDetails.value?.year || tvSheetShow.value?.year || null,
+      seasonTitle: season.name,
+      seriesTitle: sheetTitle(),
+      seriesImageUrl: tvSheetDetails.value?.posterUrl ?? tvSheetShow.value?.posterUrl,
+      seriesBackdropUrl: tvSheetDetails.value?.backdropUrl ?? tvSheetShow.value?.backdropUrl,
+      seriesOverview: tvSheetDetails.value?.overview ?? tvSheetShow.value?.overview,
+      seriesYear: Number(tvSheetDetails.value?.year ?? tvSheetShow.value?.year) || null,
+    }),
+  }
+}
+
+async function resolveSeriesActionContext() {
+  const base = seriesActionContext.value
+  const seasons = [...(tvSheetDetails.value?.seasons ?? [])]
+    .sort((left, right) => left.seasonNumber - right.seasonNumber)
+  if (!base || seasons.length === 0) return null
+
+  await Promise.all(seasons.map((season) => loadSeason(season.seasonNumber)))
+  const metadata = seasons.flatMap((season) =>
+    (seasonCache.value[season.seasonNumber]?.episodes ?? [])
+      .map((episode) => episodeActionMetadata(season, episode)))
+  for (const season of seasons) {
+    const count = seasonCache.value[season.seasonNumber]?.episodes?.length ?? 0
+    if (season.episodeCount && count < season.episodeCount) {
+      throw new Error(`Could not load every episode in ${seasonLabel(season)}.`)
+    }
+  }
+  return { ...base, metadata }
+}
+
+async function resolveSeasonActionContext() {
+  const context = seasonActionContext.value
+  const season = tvSheetDetails.value?.seasons?.find((item) => item.seasonNumber === selectedSeason.value)
+  if (!context || !season) return null
+
+  await loadSeason(season.seasonNumber)
+  const episodes = seasonCache.value[season.seasonNumber]?.episodes ?? []
+  if (season.episodeCount && episodes.length < season.episodeCount) {
+    throw new Error(`Could not load every episode in ${seasonLabel(season)}.`)
+  }
+  return { ...context, metadata: episodes.map((episode) => episodeActionMetadata(season, episode)) }
+}
+
 function episodeActionContext(ep) {
   const show = tvSheetShow.value
-  const localItem = localItemFor(show?.id)
+  const localItem = localCatalogItem.value
+  const season = tvSheetDetails.value?.seasons?.find((entry) => entry.seasonNumber === selectedSeason.value)
   return {
-    catalogItemId: localItem?.id ?? null,
+    catalogItemId: null,
     catalogTypeId: localItem?.catalogTypeId ?? null,
     kind: 'Tv',
+    sourceKey: show?.isCatalogItem ? null : show?.sourceKey ?? defaultTvSourceKey.value,
     externalId: String(show?.id ?? ''),
     title: `${show?.title ?? 'TV Show'} – S${selectedSeason.value}E${ep.episodeNumber}${ep.title ? ` · ${ep.title}` : ''}`,
     imageUrl: ep.stillUrl ?? tvSheetDetails.value?.posterUrl ?? show?.posterUrl,
@@ -125,6 +259,7 @@ function episodeActionContext(ep) {
     year: Number(ep.airDate?.slice?.(0, 4) ?? tvSheetDetails.value?.year ?? show?.year) || null,
     season: selectedSeason.value,
     episode: ep.episodeNumber,
+    metadata: season ? [episodeActionMetadata(season, ep)] : [],
   }
 }
 
@@ -190,7 +325,20 @@ onBeforeUnmount(() => setTvNextHandler(null))
             </q-img>
             <div class="sheet-header-main col row items-center q-gutter-md">
               <div class="sheet-header-text col">
-                <div class="sheet-title">{{ sheetTitle() }}</div>
+                <div class="tv-sheet-title-row">
+                  <div class="sheet-title">{{ sheetTitle() }}</div>
+                  <q-btn
+                    v-if="localCatalogItem && canEditCatalogs"
+                    flat
+                    dense
+                    no-caps
+                    color="grey-3"
+                    icon="edit"
+                    label="Edit"
+                    title="Edit series metadata"
+                    @click="editSeriesMetadata"
+                  />
+                </div>
                 <div class="sheet-meta">
                   <span class="sheet-year">{{ tvSheetDetails?.year ?? tvSheetShow.year ?? '—' }}</span>
                   <span v-if="tvSheetDetails?.status" class="sheet-status">{{ tvSheetDetails.status }}</span>
@@ -202,6 +350,11 @@ onBeforeUnmount(() => setTvNextHandler(null))
                     {{ sheetRating() }}
                     <span class="text-grey-6">/ 10</span>
                   </span>
+                </div>
+                <div v-if="identifierFields.length" class="sheet-identifiers row q-gutter-xs">
+                  <q-chip v-for="field in identifierFields" :key="field.label" dense outline color="grey-6" text-color="grey-4">
+                    <span class="text-weight-medium q-mr-xs">{{ field.label }}:</span>{{ field.value }}
+                  </q-chip>
                 </div>
                 <div v-if="tvSheetDetails?.genres?.length" class="sheet-genres row q-gutter-sm">
                   <q-chip
@@ -220,6 +373,18 @@ onBeforeUnmount(() => setTvNextHandler(null))
               </div>
             </div>
           </div>
+
+          <MediaDetailsActions
+            v-if="tvSheetDetails && !tvSheetShow.isCatalogItem"
+            class="tv-series-actions q-mt-md"
+            kind="tv"
+            :item="tvSheetShow"
+            :play-handler="playFirstEpisode"
+            :queue-handler="queueFirstEpisode"
+            :playlist-item-handler="firstEpisodePlaylistItem"
+            :action-context="seriesActionContext"
+            :context-resolver="resolveSeriesActionContext"
+          />
 
           <div v-if="tvSheetLoading" class="flex flex-center q-pa-md">
             <q-spinner-dots color="primary" size="2rem" />
@@ -269,6 +434,13 @@ onBeforeUnmount(() => setTvNextHandler(null))
                   option-value="value"
                   class="tv-season-select"
                 />
+                <PluginActionButtons
+                  v-if="selectedSeason != null && !tvSheetShow.isCatalogItem"
+                  surface="DetailScreen"
+                  kind="tv"
+                  :context="seasonActionContext"
+                  :context-resolver="resolveSeasonActionContext"
+                />
               </div>
               <div v-if="selectedSeason != null" class="tv-episodes">
                 <div v-if="seasonState(selectedSeason)?.loading" class="flex flex-center q-pa-md">
@@ -304,6 +476,11 @@ onBeforeUnmount(() => setTvNextHandler(null))
                       <div class="tv-episode-meta">
                         <span>{{ ep.airDate ?? 'air date n/a' }}</span>
                         <span v-if="ep.runtimeMinutes"> · {{ formatRuntime(ep.runtimeMinutes) }}</span>
+                        <span v-if="ep.voteAverage" class="tv-episode-rating">
+                          <span class="tv-episode-rating-separator"> · </span>
+                          <q-icon name="star" size="12px" />
+                          {{ ep.voteAverage.toFixed(1) }}
+                        </span>
                       </div>
                       <div v-if="ep.overview" class="tv-episode-overview">{{ ep.overview }}</div>
                     </div>
@@ -316,10 +493,6 @@ onBeforeUnmount(() => setTvNextHandler(null))
                       :play-handler="() => playEpisode(ep)"
                       :action-context="episodeActionContext(ep)"
                     />
-                    <div v-if="ep.voteAverage" class="tv-episode-rating">
-                      <q-icon name="star" color="secondary" size="14px" />
-                      {{ ep.voteAverage.toFixed(1) }}
-                    </div>
                   </div>
                 </template>
               </div>

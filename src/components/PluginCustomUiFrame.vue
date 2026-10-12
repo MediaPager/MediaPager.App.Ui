@@ -53,8 +53,8 @@ async function handleApiRequest(message) {
       headers: {
         'Content-Type': 'application/json',
         // Only the parent attaches credentials, and only to allowlisted settings/actions or
-        // the sanitized catalog-list response granted to the Downloads plugin.
-        Authorization: `******${token}`,
+        // the sanitized catalog-list response granted to plugin UIs.
+        Authorization: `Bearer ${token}`,
       },
       body: request.body,
       credentials: 'omit',

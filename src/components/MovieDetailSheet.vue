@@ -26,6 +26,27 @@ const sourceLabel = computed(() => {
   if (localItem.value) return localItem.value.catalogName || 'Local catalog'
   return sourceTabs.value.find((source) => source.sourceKey === defaultSourceKey.value)?.label ?? 'Stream'
 })
+const identifierFields = computed(() => {
+  const catalogType = localItem.value?.catalogTypeSlug
+  const fields = []
+  const add = (label, value) => {
+    if (value != null && String(value).trim()) fields.push({ label, value: String(value) })
+  }
+
+  if (catalogType === 'music') {
+    add('MusicBrainz ID', localItem.value?.musicBrainzId)
+    add('ISRC', localItem.value?.isrc)
+  } else if (catalogType === 'books' || catalogType === 'audiobooks') {
+    add('ISBN', localItem.value?.isbn)
+    if (!localItem.value?.isbn) add('Provider ID', localItem.value?.externalId)
+  } else if (catalogType === 'podcasts') {
+    add('Episode ID', localItem.value?.externalId)
+  } else {
+    add('IMDb ID', sheetDetails.value?.imdbId ?? localItem.value?.imdbId)
+    add('TMDB ID', localItem.value?.externalId ?? (!localItem.value ? sheetMovie.value?.id : null))
+  }
+  return fields
+})
 
 const queueItem = computed(() => ({
   ...sheetMovie.value,
@@ -86,7 +107,7 @@ function playCurrentMovie() {
                 <div class="sheet-header-text col">
                   <div class="sheet-title">{{ sheetDetails?.title ?? sheetMovie.title }}</div>
                   <div class="sheet-origin">Stream: {{ sourceLabel }}</div>
-                  <div class="sheet-meta">
+                <div class="sheet-meta">
                   <span class="sheet-year">{{ sheetDetails?.year ?? sheetMovie.year ?? '—' }}</span>
                   <span v-if="sheetDetails?.runtimeMinutes" class="sheet-runtime">{{ formatRuntime(sheetDetails.runtimeMinutes) }}</span>
                   <span class="sheet-rating">
@@ -97,6 +118,11 @@ function playCurrentMovie() {
                   <span v-if="localItem" class="sheet-owned">
                     <q-icon name="check_circle" color="secondary" size="14px" /> in your library
                   </span>
+                </div>
+                <div v-if="identifierFields.length" class="sheet-identifiers row q-gutter-xs">
+                  <q-chip v-for="field in identifierFields" :key="field.label" dense outline color="grey-6" text-color="grey-4">
+                    <span class="text-weight-medium q-mr-xs">{{ field.label }}:</span>{{ field.value }}
+                  </q-chip>
                 </div>
                 <div v-if="sheetDetails?.genres?.length" class="sheet-genres row q-gutter-sm">
                   <q-chip
