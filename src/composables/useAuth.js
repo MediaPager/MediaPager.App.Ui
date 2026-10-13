@@ -18,7 +18,8 @@ api.interceptors.response.use((response) => response, (requestError) => {
 })
 
 export function useAuth() {
-  const canInvite = computed(() => userScopes.value.includes('admin:super') || userScopes.value.includes('admin:can-invite'))
+  const canInvite = computed(() => userScopes.value.includes('admin:super') ||
+    userScopes.value.includes('users:can-invite') || userScopes.value.includes('admin:can-invite'))
   const canEditSettings = computed(() => userScopes.value.includes('admin:super') || userScopes.value.includes('admin:settings-edit'))
   const canEditCatalogs = computed(() => userScopes.value.includes('admin:super') || userScopes.value.includes('admin:catalogs-edit'))
   const isSuperAdmin = computed(() => userScopes.value.includes('admin:super'))

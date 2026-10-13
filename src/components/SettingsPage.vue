@@ -15,6 +15,7 @@ import PluginsPanel from './PluginsPanel.vue'
 import PluginSettingsPanel from './PluginSettingsPanel.vue'
 import PluginCustomUiFrame from './PluginCustomUiFrame.vue'
 import NotFoundPage from './NotFoundPage.vue'
+import UsersPanel from './UsersPanel.vue'
 
 const { canInvite, canEditSettings, canEditCatalogs, isSuperAdmin } = useAuth()
 const {
@@ -37,6 +38,15 @@ const inviteEmail = ref('')
 const inviteMessage = ref('')
 const inviteError = ref('')
 const inviteLoading = ref(false)
+const gitSshKeyConfigured = ref(false)
+const gitSshKeyInput = ref('')
+const gitSshKeyLoading = ref(false)
+const gitSshKeyMessage = ref('')
+const gitSshKeyError = ref('')
+const databasePasswordInput = ref('')
+const databasePasswordLoading = ref(false)
+const databasePasswordMessage = ref('')
+const databasePasswordError = ref('')
 
 // Catalog management (scoped: admin:catalogs-edit / admin:super).
 const { catalogs, catalogsLoading, fetchCatalogs } = useCatalogs()
@@ -77,6 +87,7 @@ function goToCatalogsTab() {
 function fixSetupItem(item) {
   if (item.action === 'catalogs') goToCatalogsTab()
   else if (item.action === 'general') goToSettingsTab('general')
+  else if (item.action === 'plugins') goToSettingsTab('plugins')
   // Plugin-scoped items (e.g. the TMDB key) open that plugin's settings dialog —
   // plugin settings have no nav tabs of their own.
   else if (typeof item.action === 'string' && item.action.startsWith('plugin:')) {
@@ -150,6 +161,76 @@ watch(() => route.params.tab, (tab) => {
 }, { immediate: true })
 if (!sourcesLoaded.value) fetchSources()
 if (canEditSettings.value) fetchOfficialPlugins()
+if (isSuperAdmin.value) loadGitSshKeyStatus()
+
+async function loadGitSshKeyStatus() {
+  try {
+    const { data } = await api.get('/settings/git-ssh-key')
+    gitSshKeyConfigured.value = !!data?.configured
+  } catch { /* keep the settings page usable if the status check fails */ }
+}
+
+async function saveGitSshKey() {
+  gitSshKeyLoading.value = true
+  gitSshKeyMessage.value = ''
+  gitSshKeyError.value = ''
+  try {
+    const { data } = await api.put('/settings/git-ssh-key', { privateKey: gitSshKeyInput.value })
+    gitSshKeyConfigured.value = true
+    gitSshKeyInput.value = ''
+    gitSshKeyMessage.value = data?.message ?? 'Encrypted SSH key saved.'
+  } catch (requestError) {
+    gitSshKeyError.value = requestError.response?.data?.error ?? requestError.response?.data?.detail ?? 'Could not save the SSH key.'
+  } finally {
+    gitSshKeyLoading.value = false
+  }
+}
+
+async function clearGitSshKey() {
+  gitSshKeyLoading.value = true
+  gitSshKeyMessage.value = ''
+  gitSshKeyError.value = ''
+  try {
+    const { data } = await api.delete('/settings/git-ssh-key')
+    gitSshKeyConfigured.value = false
+    gitSshKeyMessage.value = data?.message ?? 'Saved SSH key removed.'
+  } catch (requestError) {
+    gitSshKeyError.value = requestError.response?.data?.detail ?? 'Could not remove the SSH key.'
+  } finally {
+    gitSshKeyLoading.value = false
+  }
+}
+
+async function saveDatabasePassword() {
+  databasePasswordLoading.value = true
+  databasePasswordMessage.value = ''
+  databasePasswordError.value = ''
+  try {
+    const { data } = await api.put('/settings/database-password', { password: databasePasswordInput.value })
+    databasePasswordInput.value = ''
+    settingsValues.value['Settings:Db:PasswordConfigured'] = 'true'
+    databasePasswordMessage.value = data?.message ?? 'Encrypted database password saved.'
+  } catch (requestError) {
+    databasePasswordError.value = requestError.response?.data?.error ?? requestError.response?.data?.detail ?? 'Could not save the database password.'
+  } finally {
+    databasePasswordLoading.value = false
+  }
+}
+
+async function clearDatabasePassword() {
+  databasePasswordLoading.value = true
+  databasePasswordMessage.value = ''
+  databasePasswordError.value = ''
+  try {
+    const { data } = await api.delete('/settings/database-password')
+    settingsValues.value['Settings:Db:PasswordConfigured'] = 'false'
+    databasePasswordMessage.value = data?.message ?? 'Saved database password removed.'
+  } catch (requestError) {
+    databasePasswordError.value = requestError.response?.data?.detail ?? 'Could not remove the database password.'
+  } finally {
+    databasePasswordLoading.value = false
+  }
+}
 
 // Email providers are plugins: the provider dropdown lists every loaded plugin with the
 // "email" capability, the active one's settings render through its own schema panel, and
@@ -160,18 +241,19 @@ const emailPlugins = computed(() =>
 const emailProviderOptions = computed(() =>
   emailPlugins.value.map((plugin) => ({ label: plugin.name, value: plugin.id })))
 const activeEmailPlugin = computed(() =>
-  emailPlugins.value.find((plugin) => plugin.id === settingsValues.value['Email:Provider']) ??
+  emailPlugins.value.find((plugin) => plugin.id === settingsValues.value['Settings:Email:Provider']) ??
   emailPlugins.value[0] ?? null)
 const officialEmailProviders = computed(() =>
   officialPlugins.value.filter((entry) => entry.category === 'email'))
 
 async function pickEmailProvider(pluginId) {
-  settingsValues.value['Email:Provider'] = pluginId
+  settingsValues.value['Settings:Email:Provider'] = pluginId
   settingsError.value = ''
   try {
     // Persisted immediately: the settings panel below swaps to the picked provider.
-    const { data } = await api.put('/settings', { 'Email:Provider': pluginId })
+    const { data } = await api.put('/settings', { 'Settings:Email:Provider': pluginId })
     settingsMessage.value = data?.message ?? 'Settings saved.'
+    await fetchSetupChecklist()
   } catch (requestError) {
     settingsError.value = requestError.response?.data?.detail ?? 'Could not save the email provider.'
   }
@@ -185,7 +267,7 @@ const subtitlePlugins = computed(() =>
 const subtitleProviderOptions = computed(() =>
   subtitlePlugins.value.map((plugin) => ({ label: plugin.name, value: plugin.id })))
 const activeSubtitlePlugin = computed(() => {
-  const wanted = settingsValues.value['Subtitles:Provider'] ?? ''
+  const wanted = settingsValues.value['Settings:Subtitles:Provider'] ?? ''
   // Full plugin id, or a legacy short value ("subdl") matched by last id segment.
   return subtitlePlugins.value.find((plugin) => plugin.id === wanted) ??
     (wanted ? subtitlePlugins.value.find((plugin) => plugin.id.endsWith(`.${wanted}`)) : null) ??
@@ -193,11 +275,11 @@ const activeSubtitlePlugin = computed(() => {
 })
 
 async function pickSubtitleProvider(pluginId) {
-  settingsValues.value['Subtitles:Provider'] = pluginId
+  settingsValues.value['Settings:Subtitles:Provider'] = pluginId
   settingsError.value = ''
   try {
     // Persisted immediately: the settings panel below swaps to the picked provider.
-    const { data } = await api.put('/settings', { 'Subtitles:Provider': pluginId })
+    const { data } = await api.put('/settings', { 'Settings:Subtitles:Provider': pluginId })
     settingsMessage.value = data?.message ?? 'Settings saved.'
     fetchSetupChecklist()
   } catch (requestError) {
@@ -228,9 +310,13 @@ const visibleGroups = computed(() => [
   ...settingsGroups.filter((group) =>
     group.name === 'catalogs'
       ? canEditCatalogs.value
-      : group.name === 'setup'
-        ? canEditSettings.value && !setupReady.value
-        : canInvite.value || canEditSettings.value),
+      : group.name === 'users'
+        ? canInvite.value
+        : group.name === 'storage'
+          ? canEditSettings.value
+        : group.name === 'setup'
+          ? canEditSettings.value && !setupReady.value
+          : canEditSettings.value),
   ...(canEditSettings.value ? pluginNavGroups.value : []),
   ...manageGroup.value,
 ])
@@ -327,6 +413,7 @@ async function sendInvite() {
               :name="group.name"
               :class="{
                 'plugins-tab-panel': group.manage,
+                'users-tab-panel': group.name === 'users',
                 'plugin-ui-tab-panel': group.pluginNav && group.uiPath,
               }"
             >
@@ -334,6 +421,14 @@ async function sendInvite() {
 
               <template v-if="group.manage">
                 <PluginsPanel @open-settings="openPluginSettings" />
+              </template>
+
+              <template v-else-if="group.name === 'users'">
+                <UsersPanel v-if="isSuperAdmin" />
+                <div v-else class="invite-only-intro q-mb-lg">
+                  <div class="text-h5 text-weight-bold">Invite someone to your library</div>
+                  <div class="text-grey-5 q-mt-sm">New accounts start with basic access and can’t open administration settings.</div>
+                </div>
               </template>
 
               <template v-else-if="group.pluginNav">
@@ -348,6 +443,7 @@ async function sendInvite() {
                   v-else
                   :key="group.pluginId"
                   :plugin="sourcePlugins.find((plugin) => plugin.id === group.pluginId)"
+                  @saved="fetchSetupChecklist"
                 />
               </template>
 
@@ -395,47 +491,142 @@ async function sendInvite() {
                 </div>
               </template>
 
-              <template v-else-if="group.name === 'general'">
-                <q-input
-                  v-for="field in group.fields"
-                  :key="field.key"
-                  v-model="settingsValues[field.key]"
-                  dark
-                  outlined
-                  dense
-                  :type="field.type === 'password' ? 'password' : 'text'"
-                  :label="field.label"
-                  class="q-mb-md"
-                  :class="{ 'field-required-empty': field.required && !(settingsValues[field.key] ?? '').trim() }"
-                >
-                  <template #append>
+              <template v-else-if="group.name === 'storage'">
+                <div class="storage-settings-intro q-mb-lg">
+                  <div class="text-subtitle1 text-weight-bold">Application data and media libraries</div>
+                  <div class="text-body2 text-grey-6 q-mt-xs">
+                    Application-managed files belong under the persistent data root. Catalog media is different: it can be very large and stays in the folder configured for each catalog.
+                  </div>
+                </div>
+                <q-banner dense rounded class="storage-media-note q-mb-lg">
+                  <template #avatar><q-icon name="video_library" color="primary" /></template>
+                  <div class="text-weight-medium">Keep large media libraries separate when possible</div>
+                  <div class="text-caption text-grey-6 q-mt-xs">
+                    A separate host or NAS mount makes media easier to share with other apps and avoids mixing terabytes of media with the database and app state. In Docker, mount it at a stable path such as <code>/mnt/media</code>, then use that container path for the catalog. You can also store catalog media under <code>/data/media</code> if you choose.
+                  </div>
+                </q-banner>
+                <template v-for="field in group.fields" :key="field.key">
+                  <q-select
+                    v-if="field.key === 'Settings:Db:Provider'"
+                    v-model="settingsValues[field.key]"
+                    :options="[{ label: 'SQLite', value: 'Sqlite' }, { label: 'PostgreSQL', value: 'PostgreSQL' }]"
+                    dark outlined dense emit-value map-options :label="field.label" class="q-mb-md"
+                  />
+                  <q-input
+                    v-else
+                    v-model="settingsValues[field.key]"
+                    dark outlined dense
+                    :label="field.label"
+                    :type="field.key === 'Settings:Db:Password' ? 'password' : 'text'"
+                    :placeholder="field.placeholder ?? ''"
+                    class="q-mb-md"
+                  />
+                </template>
+                <div class="storage-secret-card q-mt-md">
+                  <div class="text-weight-medium">Database password</div>
+                  <div class="text-caption text-grey-6 q-mt-xs">
+                    {{ settingsValues['Settings:Db:PasswordConfigured'] === 'true' ? 'A password is configured; its value is never shown.' : 'No password is saved. Deployment environment values still take precedence.' }}
+                  </div>
+                  <q-input
+                    v-model="databasePasswordInput"
+                    type="password"
+                    dark outlined dense
+                    label="Set or replace database password"
+                    autocomplete="new-password"
+                    class="q-mt-md"
+                  />
+                  <div class="row justify-end q-gutter-sm q-mt-sm">
                     <q-btn
-                      v-if="field.browse"
-                      flat
-                      round
-                      dense
-                      icon="more_vert"
-                      color="primary"
-                      :loading="browseLoadingKey === field.key"
-                      aria-label="Choose folder"
-                      title="Choose folder"
-                      @click.prevent="browseFolder(field.key)"
+                      v-if="settingsValues['Settings:Db:PasswordConfigured'] === 'true'"
+                      flat dense no-caps color="negative" label="Remove saved password"
+                      :loading="databasePasswordLoading" @click="clearDatabasePassword"
                     />
-                  </template>
-                </q-input>
+                    <q-btn
+                      unelevated dense no-caps color="primary" text-color="dark" icon="lock"
+                      label="Save encrypted password" :disable="!databasePasswordInput"
+                      :loading="databasePasswordLoading" @click="saveDatabasePassword"
+                    />
+                  </div>
+                  <q-banner v-if="databasePasswordMessage" dense rounded class="auth-message q-mt-sm">{{ databasePasswordMessage }}</q-banner>
+                  <q-banner v-if="databasePasswordError" dense rounded class="error-banner q-mt-sm">{{ databasePasswordError }}</q-banner>
+                </div>
+                <q-banner dense rounded class="q-mt-md">
+                  Environment variables override saved runtime values. Changing database provider or SQLite path requires a managed migration and restart.
+                </q-banner>
+              </template>
+
+              <template v-else-if="group.name === 'general'">
+                <template v-for="field in group.fields" :key="field.key">
+                  <q-input
+                    v-model="settingsValues[field.key]"
+                    dark
+                    outlined
+                    dense
+                    :type="field.type === 'password' ? 'password' : 'text'"
+                    :label="field.label"
+                    :readonly="field.readonly"
+                    class="q-mb-md"
+                    :class="{ 'field-required-empty': field.required && !(settingsValues[field.key] ?? '').trim() }"
+                  >
+                    <template #append>
+                      <q-btn
+                        v-if="field.browse"
+                        flat
+                        round
+                        dense
+                        icon="more_vert"
+                        color="primary"
+                        :loading="browseLoadingKey === field.key"
+                        aria-label="Choose folder"
+                        title="Choose folder"
+                        @click.prevent="browseFolder(field.key)"
+                      />
+                    </template>
+                  </q-input>
+                  <div v-if="field.key === 'Settings:Site:BaseUrl'" class="text-caption text-grey-6 q-mt-negative q-mb-md">
+                    Saved in this site’s runtime settings and used for new email links, taking precedence over the environment fallback.
+                  </div>
+                </template>
+                <div v-if="isSuperAdmin" class="git-key-card q-mb-lg">
+                  <div class="row items-center no-wrap q-gutter-sm">
+                    <q-icon name="key" color="primary" size="20px" />
+                    <div class="col">
+                      <div class="text-weight-medium">Private Git access</div>
+                      <div class="text-caption text-grey-6">
+                        {{ gitSshKeyConfigured ? 'An SSH key is saved and encrypted in the settings database.' : 'Add a deploy key to install plugins from private repositories.' }}
+                      </div>
+                    </div>
+                    <q-badge v-if="gitSshKeyConfigured" color="positive" label="configured" />
+                  </div>
+                  <q-input
+                    v-model="gitSshKeyInput"
+                    type="textarea"
+                    dark outlined dense autogrow
+                    label="Paste SSH private key"
+                    autocomplete="new-password"
+                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                    class="q-mt-md"
+                  />
+                  <div class="row justify-end q-gutter-sm q-mt-sm">
+                    <q-btn v-if="gitSshKeyConfigured" flat dense no-caps color="negative" label="Remove saved key" :loading="gitSshKeyLoading" @click="clearGitSshKey" />
+                    <q-btn unelevated dense no-caps color="primary" text-color="dark" icon="lock" label="Save encrypted key" :disable="!gitSshKeyInput.trim()" :loading="gitSshKeyLoading" @click="saveGitSshKey" />
+                  </div>
+                  <q-banner v-if="gitSshKeyMessage" dense rounded class="auth-message q-mt-sm">{{ gitSshKeyMessage }}</q-banner>
+                  <q-banner v-if="gitSshKeyError" dense rounded class="error-banner q-mt-sm">{{ gitSshKeyError }}</q-banner>
+                </div>
 
                 <q-separator spaced class="q-mt-none" />
                 <div class="panel-title q-mb-md">Providers</div>
 
                 <q-select
-                  :model-value="settingsValues['Email:Provider'] || activeEmailPlugin?.id || null"
+                  :model-value="settingsValues['Settings:Email:Provider'] || activeEmailPlugin?.id || null"
                   :options="emailProviderOptions"
                   dark
                   dense
                   outlined
                   emit-value
                   map-options
-                  label="Email provider"
+                  label="System email provider"
                   class="q-mb-xs"
                   @update:model-value="pickEmailProvider"
                 >
@@ -453,6 +644,9 @@ async function sendInvite() {
                     />
                   </template>
                 </q-select>
+                <div class="text-caption text-grey-6 q-mb-md">
+                  Used for invitations and password resets. If the selected provider is not configured, MediaPager uses another configured provider when available.
+                </div>
                 <q-banner v-if="officialEmailProviders.length" dense class="email-providers-note q-mb-md">
                   <div class="text-caption">
                     <template v-for="(provider, index) in officialEmailProviders" :key="provider.id">
@@ -462,14 +656,13 @@ async function sendInvite() {
                     </template>
                   </div>
                   <div class="text-caption text-grey-6">
-                    SMTP is the default and ships ready. Mailgun, Gmail and Office 365 are
-                    optional — open a link for install instructions; a loaded provider's
-                    settings open from the gear next to the dropdown.
+                    SMTP ships with the app. Enable another provider under Settings → Plugins,
+                    then select it here. Open the selected provider's settings with the gear.
                   </div>
                 </q-banner>
 
                 <q-select
-                  :model-value="activeSubtitlePlugin?.id || settingsValues['Subtitles:Provider'] || null"
+                  :model-value="activeSubtitlePlugin?.id || settingsValues['Settings:Subtitles:Provider'] || null"
                   :options="subtitleProviderOptions"
                   dark
                   dense
@@ -633,6 +826,7 @@ async function sendInvite() {
             v-if="settingsDialogPlugin"
             :key="settingsDialogPlugin.id"
             :plugin="settingsDialogPlugin"
+            @saved="fetchSetupChecklist"
           />
         </q-card-section>
       </q-card>
@@ -650,6 +844,11 @@ async function sendInvite() {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   background: #0e1525;
+}
+
+.settings-panels :deep(.q-tab-panel.users-tab-panel) {
+  width: 100%;
+  max-width: none;
 }
 
 .settings-panel--plugin-ui {

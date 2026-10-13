@@ -37,6 +37,10 @@ router.beforeEach((to) => {
   if (to.name === 'settings' && !canAccessSettings()) {
     return { name: 'stream', params: { tab: 'movies' } }
   }
+  if (to.name === 'settings' && !isSuperAdmin() && canInvite() &&
+      (!to.params.tab || to.params.tab !== 'users')) {
+    return { name: 'settings', params: { tab: 'users' } }
+  }
   return true
 })
 
@@ -46,7 +50,25 @@ function canAccessSettings() {
     return scopes.includes('admin:super') ||
       scopes.includes('admin:settings-edit') ||
       scopes.includes('admin:catalogs-edit') ||
+      scopes.includes('users:can-invite') ||
       scopes.includes('admin:can-invite')
+  } catch {
+    return false
+  }
+}
+
+function canInvite() {
+  try {
+    const scopes = JSON.parse(localStorage.getItem('mediapager.scopes') ?? '[]')
+    return scopes.includes('admin:super') || scopes.includes('users:can-invite') || scopes.includes('admin:can-invite')
+  } catch {
+    return false
+  }
+}
+
+function isSuperAdmin() {
+  try {
+    return JSON.parse(localStorage.getItem('mediapager.scopes') ?? '[]').includes('admin:super')
   } catch {
     return false
   }

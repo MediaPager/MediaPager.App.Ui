@@ -10,6 +10,7 @@ import { useCatalogs } from '../composables/useCatalogs'
 const props = defineProps({
   plugin: { type: Object, required: true },
 })
+const emit = defineEmits(['saved'])
 
 const { fetchPluginSettings, savePluginSettings, fetchSources } = useSources()
 const { catalogs, fetchCatalogs } = useCatalogs()
@@ -70,6 +71,7 @@ async function save() {
     // destination catalog), so refresh the plugin action descriptors too.
     await fetchSources()
     message.value = data?.message ?? 'Saved.'
+    emit('saved')
   } catch (requestError) {
     error.value = requestError.response?.data?.detail ?? `Could not save ${props.plugin.name} settings.`
   } finally {
@@ -79,7 +81,7 @@ async function save() {
 
 function placeholderFor(field) {
   if (field.secret) return '••••••••  (leave blank to keep the saved value)'
-  return field.defaultValue ?? ''
+  return field.placeholder ?? field.defaultValue ?? ''
 }
 </script>
 
@@ -103,6 +105,7 @@ function placeholderFor(field) {
         :type="field.type === 'password' ? 'password' : 'text'"
         :label="field.label + (field.required ? ' *' : '')"
         :placeholder="placeholderFor(field)"
+        :hint="field.description || undefined"
         dark
         dense
         outlined

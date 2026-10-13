@@ -30,7 +30,7 @@ const router = useRouter()
 // Search hides on the settings screen (it searches catalog/stream, not settings).
 const settingsOpen = computed(() => route.name === 'settings')
 
-const { currentUserEmail, userScopes, userInitial, isSuperAdmin } = useAuth()
+const { currentUserEmail, userScopes, userInitial, isSuperAdmin, canInvite, canEditSettings } = useAuth()
 const { query, search, openDetails } = useMovies()
 const { onPlay, onPlaySourceItem } = usePlayback()
 const { playlistDrawerOpen, queue, addToQueue } = usePlaylist()
@@ -323,8 +323,8 @@ function cleanupTypeahead() {
 onBeforeUnmount(cleanupTypeahead)
 
 function openSettings() {
-  loadSettings()
-  router.push({ name: 'settings' })
+  if (canEditSettings.value) loadSettings()
+  router.push({ name: 'settings', params: { tab: !isSuperAdmin.value && canInvite.value ? 'users' : 'general' } })
 }
 
 function openProfile() {
@@ -418,7 +418,7 @@ function openProfile() {
               <q-item-section>Profile</q-item-section>
             </q-item>
             <q-item
-              v-if="isSuperAdmin"
+              v-if="isSuperAdmin || canInvite"
               clickable
               v-close-popup
               @click="openSettings"
@@ -426,7 +426,7 @@ function openProfile() {
               <q-item-section avatar>
                 <q-icon name="settings" />
               </q-item-section>
-              <q-item-section>Settings</q-item-section>
+              <q-item-section>{{ isSuperAdmin ? 'Settings' : 'Invitations' }}</q-item-section>
               <q-item-section side v-if="settingsAttentionNeeded">
                 <q-badge color="negative" text-color="white" rounded>!</q-badge>
               </q-item-section>
