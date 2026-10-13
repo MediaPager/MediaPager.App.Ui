@@ -418,10 +418,11 @@ export function usePlayback() {
 
   async function initPlayer() {
     await nextTick()
+    const useNativeHls = typeof videoEl.value?.webkitShowPlaybackTargetPicker === 'function'
     player = videojs(videoEl.value, {
       controls: false,
       fill: true,
-      html5: { vhs: { overrideNative: true } },
+      html5: { vhs: { overrideNative: !useNativeHls } },
     })
     player.on('ended', () => {
       if (playlist.hasNext.value) void playQueueItem(playlist.currentIndex.value + 1)

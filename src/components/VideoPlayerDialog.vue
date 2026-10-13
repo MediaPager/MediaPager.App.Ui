@@ -19,6 +19,8 @@ const {
   playbackVolume,
   playbackMuted,
   playbackRate,
+  streamUrl,
+  streamType,
   queue,
   hasNext,
   hasPrevious,
@@ -55,6 +57,15 @@ const {
 } = usePlayback()
 
 const isMusic = computed(() => currentMovie.value?.kind === 'music')
+const canAirPlayPlayback = computed(() => {
+  const video = videoEl.value
+  return Boolean(video && typeof video.webkitShowPlaybackTargetPicker === 'function')
+})
+const canRemotePlayback = computed(() => typeof videoEl.value?.remote?.prompt === 'function')
+// Keep the implementation available while receiver/device behavior is validated.
+const showCastButton = false
+const castSdkReady = ref(false)
+const isCasting = ref(false)
 const playbackRateOptions = [0.5, 0.75, 1, 1.25, 1.5, 2].map(value => ({ label: `${value}×`, value }))
 const miniVolumeOpen = ref(false)
 const miniSeekHovered = ref(false)
@@ -72,6 +83,12 @@ const miniVideoTarget = ref(null)
 const playerPoppedOut = ref(false)
 let playerPopoutWindow = null
 const programmaticPlayerPopoutCloses = new WeakSet()
+let castSdkLoadPromise = null
+let castSdkWindow = null
+let castSession = null
+let castRemotePlayer = null
+let castRemoteController = null
+let castStopRequested = false
 
 watch(playerOpen, (open) => {
   if (!open) closePlayerPopout()
@@ -82,6 +99,11 @@ watch(playerOpen, (open) => {
     void initPlayer().then(() => {
       nextTick(() => movePlayerVideo(playerMinimized.value))
     })
+    if (showCastButton && !isTouchDevice && !canAirPlayPlayback.value) {
+      void prepareGoogleCastSdk(window).catch(error => {
+        console.warn('Google Cast SDK failed to load.', error)
+      })
+    }
   }
   else {
     destroyPlayer()
@@ -112,6 +134,12 @@ function restoreMiniPlayer() {
     return
   }
   if (playerMinimized.value) togglePlayerMinimized()
+}
+
+function showAirPlayPicker() {
+  const video = videoEl.value
+  if (typeof video?.webkitShowPlaybackTargetPicker === 'function')
+    video.webkitShowPlaybackTargetPicker()
 }
 
 async function popOutPlayer() {
@@ -185,6 +213,13 @@ async function popOutPlayer() {
   togglePlayerMinimized()
   nextTick(resizePlayer)
   popup.focus()
+  if (showCastButton && !canAirPlayPlayback.value) {
+    void prepareGoogleCastSdk(popup).catch(error => {
+      console.warn('Google Cast SDK failed to load.', error)
+      if (playerPopoutWindow === popup && !canRemotePlayback.value)
+        Notify.create({ type: 'warning', message: 'Google Cast could not initialize in this browser.' })
+    })
+  }
 }
 
 function restorePlayerFromPopout() {
@@ -201,19 +236,31 @@ function restorePlayerFromPopout() {
   releasePopoutPointer()
   if (playerMinimized.value) togglePlayerMinimized()
   closePlayerPopoutWindow(popup)
+  if (showCastButton && !isTouchDevice && !canAirPlayPlayback.value)
+    void prepareGoogleCastSdk(window).catch(error => console.warn('Google Cast SDK failed to load.', error))
   nextTick(resizePlayer)
 }
 
 function handlePlayerPopoutClosed(popup) {
   if (programmaticPlayerPopoutCloses.has(popup)) {
     programmaticPlayerPopoutCloses.delete(popup)
+    resetCastSdkForWindow(popup)
     return
   }
   if (popup !== playerPopoutWindow) return
-  stopPlayback()
+  resetCastSdkForWindow(popup)
+  stopPlayerPlayback()
+}
+
+function resetCastSdkForWindow(popup) {
+  if (castSdkWindow !== popup) return
+  castSdkWindow = null
+  castSdkLoadPromise = null
+  castSdkReady.value = false
 }
 
 function closePlayerPopoutWindow(popup) {
+  resetCastSdkForWindow(popup)
   if (!popup || popup.closed) return
   programmaticPlayerPopoutCloses.add(popup)
   popup.close()
@@ -231,6 +278,235 @@ function closePlayerPopout() {
     playerContent.value.appendChild(document.adoptNode(controls))
   releasePopoutPointer()
   closePlayerPopoutWindow(popup)
+}
+
+function prepareGoogleCastSdk(targetWindow) {
+  if (targetWindow.cast?.framework && targetWindow.chrome?.cast) {
+    configureCastContext(targetWindow)
+    castSdkWindow = targetWindow
+    castSdkReady.value = true
+    return Promise.resolve()
+  }
+  if (castSdkWindow !== targetWindow) {
+    castSdkWindow = targetWindow
+    castSdkLoadPromise = null
+    castSdkReady.value = false
+  }
+  if (castSdkWindow === targetWindow && castSdkLoadPromise) return castSdkLoadPromise
+
+  castSdkLoadPromise = new Promise((resolve, reject) => {
+    let settled = false
+    const timeoutId = targetWindow.setTimeout(() => finish(new Error('Timed out loading Google Cast.')), 20000)
+    const finish = error => {
+      if (settled) return
+      settled = true
+      targetWindow.clearTimeout(timeoutId)
+      if (error) {
+        castSdkLoadPromise = null
+        reject(error)
+        return
+      }
+      if (targetWindow.closed || (targetWindow !== window && playerPopoutWindow !== targetWindow)) {
+        castSdkLoadPromise = null
+        reject(new Error('The player popout closed before Cast initialized.'))
+        return
+      }
+      try {
+        configureCastContext(targetWindow)
+        castSdkReady.value = true
+        resolve()
+      } catch (setupError) {
+        castSdkLoadPromise = null
+        reject(setupError)
+      }
+    }
+
+    const previousCallback = targetWindow.__onGCastApiAvailable
+    targetWindow.__onGCastApiAvailable = available => {
+      try { previousCallback?.(available) } catch { /* do not break the Cast SDK callback */ }
+      if (!available || !targetWindow.cast?.framework || !targetWindow.chrome?.cast) {
+        finish(new Error('Google Cast is not available in this browser.'))
+        return
+      }
+      finish()
+    }
+
+    const script = targetWindow.document.createElement('script')
+    script.src = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1'
+    script.async = true
+    script.onerror = () => finish(new Error('Could not download the Google Cast SDK.'))
+    targetWindow.document.head.appendChild(script)
+  })
+  return castSdkLoadPromise
+}
+
+function configureCastContext(targetWindow) {
+  targetWindow.cast.framework.CastContext.getInstance().setOptions({
+    receiverApplicationId: targetWindow.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+    autoJoinPolicy: targetWindow.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+  })
+}
+
+async function castPlayback() {
+  const video = videoEl.value
+  if (!video) return
+
+  if (isCasting.value && castSession) {
+    try { await castSession.endSession(true) } catch { /* Cast may already be disconnected */ }
+    return
+  }
+
+  if (typeof video.webkitShowPlaybackTargetPicker === 'function') {
+    video.webkitShowPlaybackTargetPicker()
+    return
+  }
+
+  if (typeof video.remote?.prompt === 'function') {
+    try {
+      await video.remote.prompt()
+      return
+    } catch (error) {
+      const castApi = window.chrome?.cast
+      if (error?.name === 'AbortError' || error?.code === castApi?.ErrorCode?.CANCEL) return
+      // Fall through to Google Cast Sender for receivers that the browser's
+      // generic Remote Playback API cannot use with this MSE-backed stream.
+    }
+  }
+
+  const castWindow = playerPopoutWindow ?? window
+  const castApi = castWindow.chrome?.cast
+  if (!castSdkReady.value || !castWindow.cast?.framework || !castApi) {
+    Notify.create({ type: 'warning', message: 'Google Cast is still initializing. Try again in a moment.' })
+    return
+  }
+
+  try {
+    const session = await castWindow.cast.framework.CastContext.getInstance().requestSession()
+    castSession = session
+    const contentType = streamType.value.toLowerCase().includes('mpegurl')
+      ? 'application/x-mpegURL'
+      : streamType.value
+    const mediaInfo = new castApi.media.MediaInfo(streamUrl.value, contentType)
+    mediaInfo.streamType = castApi.media.StreamType.BUFFERED
+    const metadata = new castApi.media.GenericMediaMetadata()
+    metadata.title = currentMovie.value?.title ?? 'MediaPager'
+    const artwork = currentMovie.value?.posterUrl ?? currentMovie.value?.artworkUrl
+    if (artwork) metadata.images = [new castApi.Image(artwork)]
+    mediaInfo.metadata = metadata
+
+    const request = new castApi.media.LoadRequest(mediaInfo)
+    request.autoplay = true
+    request.currentTime = playbackCurrentTime.value
+
+    const remotePlayer = new castWindow.cast.framework.RemotePlayer()
+    const remoteController = new castWindow.cast.framework.RemotePlayerController(remotePlayer)
+    remoteController.addEventListener(
+      castWindow.cast.framework.RemotePlayerEventType.ANY_CHANGE,
+      () => syncCastPlayback(remotePlayer),
+    )
+
+    await session.loadMedia(request)
+    castRemotePlayer = remotePlayer
+    castRemoteController = remoteController
+    castStopRequested = false
+    isCasting.value = true
+    video.pause()
+    syncCastPlayback(remotePlayer)
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.code === castApi?.ErrorCode?.CANCEL) return
+    if (castSession && !isCasting.value) {
+      try { await castSession.endSession(true) } catch { /* Cast may already be disconnected */ }
+      castSession = null
+    }
+    console.warn('Google Cast playback failed.', error)
+    const reason = error?.message ?? error?.description ?? 'No Cast receiver was found.'
+    const hint = error?.code === castApi?.ErrorCode?.RECEIVER_UNAVAILABLE
+      ? ' Check Chrome local network access and confirm the TV is on the same network.'
+      : ''
+    Notify.create({ type: 'warning', message: `Could not cast this stream (${reason}).${hint}` })
+  }
+}
+
+function syncCastPlayback(remotePlayer) {
+  if (castStopRequested) {
+    if (!remotePlayer.isConnected) castStopRequested = false
+    return
+  }
+
+  if (remotePlayer.isConnected) {
+    isCasting.value = true
+    if (Number.isFinite(remotePlayer.currentTime)) playbackCurrentTime.value = remotePlayer.currentTime
+    if (Number.isFinite(remotePlayer.duration)) playbackDuration.value = remotePlayer.duration
+    if (Number.isFinite(remotePlayer.volumeLevel)) playbackVolume.value = remotePlayer.volumeLevel
+    playerPaused.value = Boolean(remotePlayer.isPaused)
+    playbackMuted.value = Boolean(remotePlayer.isMuted)
+    return
+  }
+
+  if (!isCasting.value) return
+  isCasting.value = false
+  castSession = null
+  castRemotePlayer = null
+  castRemoteController = null
+  if (!castStopRequested && videoEl.value) {
+    videoEl.value.currentTime = playbackCurrentTime.value
+    void videoEl.value.play().catch(() => {})
+  }
+}
+
+function togglePlayerPlayback() {
+  if (isCasting.value && castRemoteController) {
+    castRemoteController.playOrPause()
+    return
+  }
+  togglePlayback()
+}
+
+function seekPlayerPlayback(time) {
+  if (isCasting.value && castRemotePlayer && castRemoteController) {
+    castRemotePlayer.currentTime = Number(time)
+    castRemoteController.seek()
+    playbackCurrentTime.value = Number(time)
+    return
+  }
+  seekPlayback(time)
+}
+
+function setPlayerVolume(value) {
+  if (isCasting.value && castRemotePlayer && castRemoteController) {
+    castRemotePlayer.volumeLevel = Math.min(1, Math.max(0, Number(value)))
+    castRemoteController.setVolumeLevel()
+    playbackVolume.value = castRemotePlayer.volumeLevel
+    return
+  }
+  setPlaybackVolume(value)
+}
+
+function togglePlayerMute() {
+  if (isCasting.value && castRemotePlayer && castRemoteController) {
+    castRemotePlayer.isMuted = !castRemotePlayer.isMuted
+    castRemoteController.muteOrUnmute()
+    playbackMuted.value = castRemotePlayer.isMuted
+    return
+  }
+  toggleMute()
+}
+
+function setPlayerPlaybackRate(value) {
+  if (!isCasting.value) setPlaybackRate(value)
+}
+
+function stopPlayerPlayback() {
+  if (castSession) {
+    castStopRequested = true
+    const session = castSession
+    castSession = null
+    try { void session.endSession(true) } catch { /* Cast may already be disconnected */ }
+  }
+  isCasting.value = false
+  castRemotePlayer = null
+  castRemoteController = null
+  stopPlayback()
 }
 
 function forwardPopoutMouseEvent(event) {
@@ -295,6 +571,26 @@ function formatTime(seconds) {
             {{ currentMovie?.title }}<span v-if="currentMovie?.year && !isMusic"> ({{ currentMovie.year }})</span>
           </div>
           <q-space />
+          <q-btn
+            v-if="canAirPlayPlayback && !showCastButton && !isCasting"
+            dense
+            flat
+            round
+            icon="airplay"
+            aria-label="AirPlay"
+            title="AirPlay"
+            @click="showAirPlayPicker"
+          />
+          <q-btn
+            v-if="showCastButton && !isTouchDevice && !isMusic && (castSdkReady || canAirPlayPlayback || canRemotePlayback)"
+            dense
+            flat
+            round
+            :icon="isCasting ? 'cast_connected' : (canAirPlayPlayback ? 'airplay' : 'cast')"
+            :aria-label="isCasting ? 'Disconnect from TV' : 'Cast, AirPlay, or Miracast'"
+            :title="isCasting ? 'Disconnect from TV' : 'Cast, AirPlay, or Miracast'"
+            @click="castPlayback"
+          />
           <q-btn
             v-if="!isTouchDevice && !isMusic"
             dense
@@ -449,20 +745,20 @@ function formatTime(seconds) {
                 :max="Math.max(playbackDuration, 1)"
                 color="primary"
                 aria-label="Seek playback"
-                @update:model-value="seekPlayback"
+                @update:model-value="seekPlayerPlayback"
               />
               <span class="player-control-time">{{ formatTime(playbackDuration) }}</span>
             </div>
             <div class="player-actions-row">
               <div class="player-volume-controls">
-                <q-btn flat round dense :icon="playerMuted || playbackVolume === 0 ? 'volume_off' : 'volume_up'" :aria-label="playerMuted ? 'Unmute' : 'Mute'" :title="playerMuted ? 'Unmute' : 'Mute'" @click="toggleMute" />
-                <q-slider class="player-volume-slider" :model-value="playbackVolume" :min="0" :max="1.2" :step="0.01" color="primary" aria-label="Volume" @update:model-value="setPlaybackVolume" />
+                <q-btn flat round dense :icon="playbackMuted || playbackVolume === 0 ? 'volume_off' : 'volume_up'" :aria-label="playbackMuted ? 'Unmute' : 'Mute'" :title="playbackMuted ? 'Unmute' : 'Mute'" @click="togglePlayerMute" />
+                <q-slider class="player-volume-slider" :model-value="playbackVolume" :min="0" :max="1.2" :step="0.01" color="primary" aria-label="Volume" @update:model-value="setPlayerVolume" />
               </div>
               <div class="player-transport">
-                <q-btn flat round dense icon="skip_previous" aria-label="Previous item" title="Previous item" :disable="!hasPrevious" @click="playPreviousInQueue" />
-                <q-btn unelevated round color="primary" text-color="dark" :icon="playerPaused ? 'play_arrow' : 'pause'" :aria-label="playerPaused ? 'Play' : 'Pause'" @click="togglePlayback" />
-                <q-btn flat round dense icon="skip_next" aria-label="Next item" title="Next item" :disable="!hasNext" @click="playNextInQueue" />
-                <q-btn flat round dense color="negative" icon="stop" aria-label="Stop playback" title="Stop playback" @click="stopPlayback" />
+                <q-btn flat round dense icon="skip_previous" aria-label="Previous item" title="Previous item" :disable="!hasPrevious || isCasting" @click="playPreviousInQueue" />
+                <q-btn unelevated round color="primary" text-color="dark" :icon="playerPaused ? 'play_arrow' : 'pause'" :aria-label="playerPaused ? 'Play' : 'Pause'" @click="togglePlayerPlayback" />
+                <q-btn flat round dense icon="skip_next" aria-label="Next item" title="Next item" :disable="!hasNext || isCasting" @click="playNextInQueue" />
+                <q-btn flat round dense color="negative" icon="stop" aria-label="Stop playback" title="Stop playback" @click="stopPlayerPlayback" />
               </div>
               <div class="player-end-controls">
               <select
@@ -470,7 +766,8 @@ function formatTime(seconds) {
                 :value="playbackRate"
                 aria-label="Playback speed"
                 title="Playback speed"
-                @change="setPlaybackRate($event.target.value)"
+                :disabled="isCasting"
+                @change="setPlayerPlaybackRate($event.target.value)"
               >
                 <option v-for="option in playbackRateOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
@@ -484,6 +781,16 @@ function formatTime(seconds) {
                   title="Return player to app"
                   data-player-popout-restore
                   @click="restorePlayerFromPopout"
+                />
+                <q-btn
+                  v-if="showCastButton && (isCasting || (playerPoppedOut && (castSdkReady || canAirPlayPlayback || canRemotePlayback)))"
+                  flat
+                  round
+                  dense
+                  :icon="isCasting ? 'cast_connected' : 'cast'"
+                  :aria-label="isCasting ? 'Disconnect from TV' : 'Cast, AirPlay, or Miracast'"
+                  :title="isCasting ? 'Disconnect from TV' : 'Cast, AirPlay, or Miracast'"
+                  @click="castPlayback"
                 />
                 <q-btn v-if="!isMusic" flat round dense icon="fullscreen" aria-label="Enter fullscreen" title="Enter fullscreen" @click="toggleFullscreen" />
               </div>
@@ -520,7 +827,7 @@ function formatTime(seconds) {
               :max="Math.max(playbackDuration, 1)"
               color="primary"
               aria-label="Seek playback"
-              @update:model-value="seekPlayback"
+              @update:model-value="seekPlayerPlayback"
             />
           </div>
         </div>
@@ -553,10 +860,10 @@ function formatTime(seconds) {
             </div>
           </div>
           <div class="player-mini-transport">
-            <q-btn flat round dense icon="skip_previous" aria-label="Previous item" title="Previous item" :disable="!hasPrevious" @click="playPreviousInQueue" />
-            <q-btn unelevated round color="primary" text-color="dark" :icon="playerPaused ? 'play_arrow' : 'pause'" :aria-label="playerPaused ? 'Play' : 'Pause'" @click="togglePlayback" />
-            <q-btn flat round dense icon="skip_next" aria-label="Next item" title="Next item" :disable="!hasNext" @click="playNextInQueue" />
-            <q-btn flat round dense color="negative" icon="stop" aria-label="Stop playback" title="Stop playback" @click="stopPlayback" />
+            <q-btn flat round dense icon="skip_previous" aria-label="Previous item" title="Previous item" :disable="!hasPrevious || isCasting" @click="playPreviousInQueue" />
+            <q-btn unelevated round color="primary" text-color="dark" :icon="playerPaused ? 'play_arrow' : 'pause'" :aria-label="playerPaused ? 'Play' : 'Pause'" @click="togglePlayerPlayback" />
+            <q-btn flat round dense icon="skip_next" aria-label="Next item" title="Next item" :disable="!hasNext || isCasting" @click="playNextInQueue" />
+            <q-btn flat round dense color="negative" icon="stop" aria-label="Stop playback" title="Stop playback" @click="stopPlayerPlayback" />
           </div>
           <div class="player-mini-end-controls">
             <div class="player-mini-volume-control" @keydown.esc="miniVolumeOpen = false">
@@ -572,15 +879,15 @@ function formatTime(seconds) {
                   reverse
                   color="primary"
                   aria-label="Volume"
-                  @update:model-value="setPlaybackVolume"
+                  @update:model-value="setPlayerVolume"
                 />
-                <q-btn flat round dense :icon="playerMuted ? 'volume_off' : 'volume_up'" :aria-label="playerMuted ? 'Unmute' : 'Mute'" :title="playerMuted ? 'Unmute' : 'Mute'" @click="toggleMute" />
+                <q-btn flat round dense :icon="playbackMuted ? 'volume_off' : 'volume_up'" :aria-label="playbackMuted ? 'Unmute' : 'Mute'" :title="playbackMuted ? 'Unmute' : 'Mute'" @click="togglePlayerMute" />
               </div>
               <q-btn
                 flat
                 round
                 dense
-                :icon="playerMuted || playbackVolume === 0 ? 'volume_off' : 'volume_up'"
+                :icon="playbackMuted || playbackVolume === 0 ? 'volume_off' : 'volume_up'"
                 aria-label="Adjust volume"
                 title="Adjust volume"
                 :aria-expanded="miniVolumeOpen"
@@ -592,7 +899,8 @@ function formatTime(seconds) {
               :value="playbackRate"
               aria-label="Playback speed"
               title="Playback speed"
-              @change="setPlaybackRate($event.target.value)"
+              :disabled="isCasting"
+              @change="setPlayerPlaybackRate($event.target.value)"
             >
               <option v-for="option in playbackRateOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>

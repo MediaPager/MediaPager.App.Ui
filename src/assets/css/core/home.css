@@ -497,11 +497,20 @@
 }
 
 .stream-filter-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.2fr)
+    minmax(112px, 0.9fr)
+    minmax(126px, 1fr)
+    minmax(126px, 1fr)
+    minmax(142px, 1.2fr)
+    minmax(140px, 1.1fr)
+    34px;
   flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
-  width: fit-content;
+  width: 100%;
+  box-sizing: border-box;
   max-width: 100%;
   overflow-x: auto;
   padding: 10px 12px;
@@ -513,28 +522,8 @@
 }
 
 .stream-filter-field {
-  flex: 0 0 auto;
-}
-
-.stream-filter-field--genre {
-  width: 150px;
-}
-
-.stream-filter-field--year {
-  width: 112px;
-}
-
-.stream-filter-field--rating,
-.stream-filter-field--votes {
-  width: 126px;
-}
-
-.stream-filter-field--language {
-  width: 142px;
-}
-
-.stream-filter-field--sort {
-  width: 140px;
+  width: 100%;
+  min-width: 0;
 }
 
 .stream-filter-clear {
@@ -544,6 +533,24 @@
 
 .stream-filter-clear .q-btn__content {
   min-width: 0;
+}
+
+@media (max-width: 700px) {
+  .stream-filter-toolbar {
+    display: flex;
+  }
+
+  .stream-filter-field {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+
+  .stream-filter-field--genre { width: 150px; }
+  .stream-filter-field--year { width: 112px; }
+  .stream-filter-field--rating,
+  .stream-filter-field--votes { width: 126px; }
+  .stream-filter-field--language { width: 142px; }
+  .stream-filter-field--sort { width: 140px; }
 }
 
 .movie-card {
