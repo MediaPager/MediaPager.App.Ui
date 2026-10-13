@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Notify } from 'quasar'
 import {
   usePlayback,
   languages,
@@ -9,6 +10,7 @@ import SubtitleStyleControls from './SubtitleStyleControls.vue'
 const {
   playerOpen,
   playerMinimized,
+  isTouchDevice,
   currentMovie,
   playbackError,
   playerPaused,
@@ -39,6 +41,7 @@ const {
   clearSubtitle,
   selectSubtitle,
   togglePlayerMinimized,
+  resizePlayer,
   togglePlayback,
   seekPlayback,
   setPlaybackVolume,
@@ -62,17 +65,210 @@ const miniSeekLabelPosition = computed(() => {
   const progress = duration > 0 ? playbackCurrentTime.value / duration : 0
   return `${Math.max(5, Math.min(95, progress * 100))}%`
 })
+const playerStage = ref(null)
+const playerContent = ref(null)
+const playerControls = ref(null)
+const miniVideoTarget = ref(null)
+const playerPoppedOut = ref(false)
+let playerPopoutWindow = null
+const programmaticPlayerPopoutCloses = new WeakSet()
 
 watch(playerOpen, (open) => {
-  if (open) void initPlayer()
-  else destroyPlayer()
+  if (!open) closePlayerPopout()
+}, { flush: 'sync' })
+
+watch(playerOpen, (open) => {
+  if (open) {
+    void initPlayer().then(() => {
+      nextTick(() => movePlayerVideo(playerMinimized.value))
+    })
+  }
+  else {
+    destroyPlayer()
+    closePlayerPopout()
+  }
 }, { flush: 'post' })
 
 watch([playerOpen, playerMinimized], ([open, minimized]) => {
   document.body.classList.toggle('player-modal-open', open && !minimized)
 }, { flush: 'post' })
 
-onBeforeUnmount(() => document.body.classList.remove('player-modal-open'))
+watch(playerMinimized, (minimized) => {
+  if (playerOpen.value && !playerPoppedOut.value) nextTick(() => movePlayerVideo(minimized))
+}, { flush: 'post' })
+
+function movePlayerVideo(minimized) {
+  if (isMusic.value || playerPoppedOut.value) return
+  const videoPlayer = videoEl.value?.closest('.video-js')
+  const target = minimized ? miniVideoTarget.value : playerStage.value
+  if (!videoPlayer || !target || videoPlayer.parentElement === target) return
+  target.appendChild(videoPlayer)
+  nextTick(resizePlayer)
+}
+
+function restoreMiniPlayer() {
+  if (playerPoppedOut.value) {
+    restorePlayerFromPopout()
+    return
+  }
+  if (playerMinimized.value) togglePlayerMinimized()
+}
+
+async function popOutPlayer() {
+  if (isTouchDevice || isMusic.value || playerPoppedOut.value) return
+  const stage = playerStage.value
+  if (!stage) return
+
+  const pictureInPicture = window.documentPictureInPicture
+  if (!pictureInPicture?.requestWindow) {
+    Notify.create({ type: 'warning', message: 'This browser does not support the player popout window.' })
+    return
+  }
+
+  let popup
+  try {
+    popup = await pictureInPicture.requestWindow({
+      width: 1000,
+      height: 650,
+      disallowReturnToOpener: true,
+    })
+  } catch {
+    Notify.create({ type: 'warning', message: 'The player popout window could not be opened.' })
+    return
+  }
+
+  const popupDocument = popup.document
+  popupDocument.title = currentMovie.value?.title ?? 'MediaPager Player'
+  popupDocument.body.classList.add('mediapager-player-popout')
+  if (document.body.classList.contains('body--dark')) popupDocument.body.classList.add('body--dark')
+  for (const stylesheet of document.head.querySelectorAll('link[rel="stylesheet"], style')) {
+    if (stylesheet.tagName === 'LINK') {
+      const link = popupDocument.createElement('link')
+      link.rel = 'stylesheet'
+      link.href = stylesheet.href
+      popupDocument.head.appendChild(link)
+    } else {
+      popupDocument.head.appendChild(stylesheet.cloneNode(true))
+    }
+  }
+
+  const shell = popupDocument.createElement('main')
+  shell.className = 'player-popout-shell q-dark'
+  const screen = popupDocument.createElement('div')
+  screen.className = 'player-popout-screen'
+  const controls = popupDocument.createElement('div')
+  controls.className = 'player-popout-controls'
+  shell.append(screen, controls)
+  popupDocument.body.replaceChildren(shell)
+
+  const playerControlsElement = playerControls.value
+  playerPopoutWindow = popup
+  playerPoppedOut.value = true
+  await nextTick()
+  playerControlsElement
+    ?.querySelector('[data-player-popout-restore]')
+    ?.addEventListener('click', restorePlayerFromPopout)
+  popup.document.addEventListener('mousemove', forwardPopoutMouseEvent, true)
+  popup.document.addEventListener('mouseup', forwardPopoutMouseEvent, true)
+  popup.addEventListener('pagehide', () => handlePlayerPopoutClosed(popup), { once: true })
+  try {
+    screen.appendChild(popupDocument.adoptNode(stage))
+    if (playerControlsElement) controls.appendChild(popupDocument.adoptNode(playerControlsElement))
+  } catch {
+    playerPoppedOut.value = false
+    playerPopoutWindow = null
+    if (playerContent.value) playerContent.value.appendChild(stage)
+    if (playerControlsElement && playerContent.value) playerContent.value.appendChild(playerControlsElement)
+    closePlayerPopoutWindow(popup)
+    return
+  }
+  togglePlayerMinimized()
+  nextTick(resizePlayer)
+  popup.focus()
+}
+
+function restorePlayerFromPopout() {
+  if (!playerPoppedOut.value) return
+  const popup = playerPopoutWindow
+  const stage = playerStage.value
+  const controls = playerControls.value
+  playerPoppedOut.value = false
+  if (stage && playerContent.value)
+    playerContent.value.appendChild(document.adoptNode(stage))
+  if (controls && playerContent.value)
+    playerContent.value.appendChild(document.adoptNode(controls))
+  playerPopoutWindow = null
+  releasePopoutPointer()
+  if (playerMinimized.value) togglePlayerMinimized()
+  closePlayerPopoutWindow(popup)
+  nextTick(resizePlayer)
+}
+
+function handlePlayerPopoutClosed(popup) {
+  if (programmaticPlayerPopoutCloses.has(popup)) {
+    programmaticPlayerPopoutCloses.delete(popup)
+    return
+  }
+  if (popup !== playerPopoutWindow) return
+  stopPlayback()
+}
+
+function closePlayerPopoutWindow(popup) {
+  if (!popup || popup.closed) return
+  programmaticPlayerPopoutCloses.add(popup)
+  popup.close()
+}
+
+function closePlayerPopout() {
+  const popup = playerPopoutWindow
+  const stage = playerStage.value
+  const controls = playerControls.value
+  playerPoppedOut.value = false
+  playerPopoutWindow = null
+  if (stage && playerContent.value)
+    playerContent.value.appendChild(document.adoptNode(stage))
+  if (controls && playerContent.value)
+    playerContent.value.appendChild(document.adoptNode(controls))
+  releasePopoutPointer()
+  closePlayerPopoutWindow(popup)
+}
+
+function forwardPopoutMouseEvent(event) {
+  document.dispatchEvent(new MouseEvent(event.type, {
+    bubbles: true,
+    cancelable: event.cancelable,
+    view: window,
+    detail: event.detail,
+    screenX: event.screenX,
+    screenY: event.screenY,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey,
+    altKey: event.altKey,
+    metaKey: event.metaKey,
+    button: event.button,
+    buttons: event.buttons,
+  }))
+}
+
+function releasePopoutPointer() {
+  document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, buttons: 0, view: window }))
+}
+
+function minimizePlayerOnEscape(event) {
+  if (event.key !== 'Escape' || !playerOpen.value || playerMinimized.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  togglePlayerMinimized()
+}
+
+onMounted(() => document.addEventListener('keydown', minimizePlayerOnEscape))
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', minimizePlayerOnEscape)
+  document.body.classList.remove('player-modal-open')
+  closePlayerPopout()
+})
 
 function formatTime(seconds) {
   const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0
@@ -99,11 +295,22 @@ function formatTime(seconds) {
             {{ currentMovie?.title }}<span v-if="currentMovie?.year && !isMusic"> ({{ currentMovie.year }})</span>
           </div>
           <q-space />
+          <q-btn
+            v-if="!isTouchDevice && !isMusic"
+            dense
+            flat
+            round
+            icon="open_in_new"
+            aria-label="Pop out player"
+            title="Pop out player"
+            :disable="!videoEl || !playerControls"
+            @click="popOutPlayer"
+          />
           <q-btn dense flat round icon="minimize" aria-label="Minimize player" title="Minimize player" @click="togglePlayerMinimized" />
         </q-bar>
 
-        <div class="player-content col" :class="{ 'player-content--hidden': playerMinimized }">
-          <div class="player-stage">
+        <div ref="playerContent" class="player-content col" :class="{ 'player-content--hidden': playerMinimized }">
+          <div ref="playerStage" class="player-stage">
             <video
               ref="videoEl"
               class="video-js vjs-big-play-centered"
@@ -232,7 +439,7 @@ function formatTime(seconds) {
             </div>
           </div>
 
-          <div v-if="!playerMinimized" class="player-controls">
+          <div v-if="!playerMinimized || playerPoppedOut" ref="playerControls" class="player-controls">
             <div class="player-seek-row">
               <span class="player-control-time">{{ formatTime(playbackCurrentTime) }}</span>
               <q-slider
@@ -267,6 +474,17 @@ function formatTime(seconds) {
               >
                 <option v-for="option in playbackRateOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
+                <q-btn
+                  v-if="playerPoppedOut"
+                  flat
+                  round
+                  dense
+                  icon="picture_in_picture"
+                  aria-label="Return player to app"
+                  title="Return player to app"
+                  data-player-popout-restore
+                  @click="restorePlayerFromPopout"
+                />
                 <q-btn v-if="!isMusic" flat round dense icon="fullscreen" aria-label="Enter fullscreen" title="Enter fullscreen" @click="toggleFullscreen" />
               </div>
             </div>
@@ -309,12 +527,26 @@ function formatTime(seconds) {
         <div class="player-mini-main">
           <div class="player-mini-media">
             <q-img
+              v-if="isMusic || !playerMinimized"
               :src="currentMovie?.artworkUrl ?? currentMovie?.posterUrl ?? undefined"
               fit="cover"
               class="player-mini-art"
             >
               <template #error><div class="absolute-full flex flex-center bg-grey-10"><q-icon :name="isMusic ? 'music_note' : 'movie'" color="grey-6" /></div></template>
             </q-img>
+            <div v-else class="player-mini-video" :class="{ 'player-mini-video--popped-out': playerPoppedOut }">
+              <div ref="miniVideoTarget" class="player-mini-video-screen" />
+              <button
+                class="player-mini-video-restore"
+                type="button"
+                :aria-label="playerPoppedOut ? 'Return player to MediaPager' : 'Restore player'"
+                :title="playerPoppedOut ? 'Return player to MediaPager' : 'Restore player'"
+                @click="restoreMiniPlayer"
+              >
+                <q-icon :name="playerPoppedOut ? 'open_in_new' : 'open_in_full'" />
+                <span v-if="playerPoppedOut">Return to app</span>
+              </button>
+            </div>
             <div class="player-mini-info">
               <div class="player-mini-title ellipsis">{{ currentMovie?.title }}</div>
               <div class="player-mini-subtitle ellipsis">{{ currentMovie?.artist ?? currentMovie?.album ?? currentMovie?.year ?? '' }}</div>
@@ -372,16 +604,8 @@ function formatTime(seconds) {
               icon="fullscreen"
               :aria-label="playerMinimized ? 'Restore and enter fullscreen' : 'Enter fullscreen'"
               :title="playerMinimized ? 'Restore and enter fullscreen' : 'Enter fullscreen'"
+              :disable="playerPoppedOut"
               @click="playerMinimized ? restorePlayerAndEnterFullscreen() : toggleFullscreen()"
-            />
-            <q-btn
-              flat
-              round
-              dense
-              :icon="playerMinimized ? 'open_in_full' : 'minimize'"
-              :aria-label="playerMinimized ? 'Restore player' : 'Minimize player'"
-              :title="playerMinimized ? 'Restore player' : 'Minimize player'"
-              @click="togglePlayerMinimized"
             />
           </div>
         </div>

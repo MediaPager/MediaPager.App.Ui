@@ -595,9 +595,13 @@ export function usePlayback() {
     }
   }
 
+  function resizePlayer() {
+    player?.trigger('resize')
+  }
+
   function togglePlayerMinimized() {
     playerMinimized.value = !playerMinimized.value
-    nextTick(() => player?.trigger('resize'))
+    nextTick(resizePlayer)
   }
 
   async function restorePlayerAndEnterFullscreen() {
@@ -912,6 +916,7 @@ export function usePlayback() {
     playLoading,
     playerOpen,
     playerMinimized,
+    isTouchDevice,
     currentMovie,
     playbackError,
     playerPaused,
@@ -967,6 +972,7 @@ export function usePlayback() {
     setPlaybackRate,
     toggleFullscreen,
     togglePlayerMinimized,
+    resizePlayer,
     restorePlayerAndEnterFullscreen,
     stopPlayback,
     resolveProviderStream,

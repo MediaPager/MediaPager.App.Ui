@@ -345,6 +345,107 @@ body.player-modal-open {
   background: #10141a;
 }
 
+.player-mini-video {
+  position: relative;
+  flex: 0 0 106px;
+  width: 106px;
+  height: 60px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #000;
+}
+
+.player-mini-video-screen,
+.player-mini-video-screen > .video-js {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.player-mini-video-screen {
+  overflow: hidden;
+}
+
+.player-mini-video-screen .vjs-tech {
+  object-fit: cover;
+}
+
+.player-mini-video-restore {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.player-mini-video-restore .q-icon {
+  opacity: 0;
+  font-size: 1.4rem;
+  transition: opacity 120ms ease;
+}
+
+.player-mini-video-restore:hover,
+.player-mini-video-restore:focus-visible {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.player-mini-video-restore:hover .q-icon,
+.player-mini-video-restore:focus-visible .q-icon {
+  opacity: 1;
+}
+
+.player-mini-video--popped-out .player-mini-video-restore {
+  gap: 6px;
+  background: rgba(8, 12, 22, 0.72);
+}
+
+.player-mini-video--popped-out .player-mini-video-restore .q-icon {
+  opacity: 1;
+}
+
+.player-mini-video-restore span {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+body.mediapager-player-popout {
+  margin: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.player-popout-shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+
+.player-popout-screen {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #000;
+}
+
+.player-popout-controls {
+  flex: 0 0 auto;
+  width: 100%;
+}
+
+.player-popout-screen > .player-stage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
 .player-mini-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -479,6 +580,12 @@ body.player-modal-open {
   .player-mini-art {
     flex-basis: 44px;
     width: 44px;
+    height: 44px;
+  }
+
+  .player-mini-video {
+    flex-basis: 78px;
+    width: 78px;
     height: 44px;
   }
 
