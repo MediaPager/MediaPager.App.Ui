@@ -43,10 +43,6 @@ const gitSshKeyInput = ref('')
 const gitSshKeyLoading = ref(false)
 const gitSshKeyMessage = ref('')
 const gitSshKeyError = ref('')
-const databasePasswordInput = ref('')
-const databasePasswordLoading = ref(false)
-const databasePasswordMessage = ref('')
-const databasePasswordError = ref('')
 
 // Catalog management (scoped: admin:catalogs-edit / admin:super).
 const { catalogs, catalogsLoading, fetchCatalogs } = useCatalogs()
@@ -201,37 +197,6 @@ async function clearGitSshKey() {
   }
 }
 
-async function saveDatabasePassword() {
-  databasePasswordLoading.value = true
-  databasePasswordMessage.value = ''
-  databasePasswordError.value = ''
-  try {
-    const { data } = await api.put('/settings/database-password', { password: databasePasswordInput.value })
-    databasePasswordInput.value = ''
-    settingsValues.value['Settings:Db:PasswordConfigured'] = 'true'
-    databasePasswordMessage.value = data?.message ?? 'Encrypted database password saved.'
-  } catch (requestError) {
-    databasePasswordError.value = requestError.response?.data?.error ?? requestError.response?.data?.detail ?? 'Could not save the database password.'
-  } finally {
-    databasePasswordLoading.value = false
-  }
-}
-
-async function clearDatabasePassword() {
-  databasePasswordLoading.value = true
-  databasePasswordMessage.value = ''
-  databasePasswordError.value = ''
-  try {
-    const { data } = await api.delete('/settings/database-password')
-    settingsValues.value['Settings:Db:PasswordConfigured'] = 'false'
-    databasePasswordMessage.value = data?.message ?? 'Saved database password removed.'
-  } catch (requestError) {
-    databasePasswordError.value = requestError.response?.data?.detail ?? 'Could not remove the database password.'
-  } finally {
-    databasePasswordLoading.value = false
-  }
-}
-
 // Email providers are plugins: the provider dropdown lists every loaded plugin with the
 // "email" capability, the active one's settings render through its own schema panel, and
 // the official-provider note offers the ones that aren't installed yet (links from
@@ -286,6 +251,22 @@ async function pickSubtitleProvider(pluginId) {
     settingsError.value = requestError.response?.data?.detail ?? 'Could not save the subtitle provider.'
   }
 }
+
+const storageFields = settingsGroups.find((group) => group.name === 'storage').fields
+const applicationDataFields = storageFields.filter((field) => [
+  'Settings:Storage:Root',
+  'Settings:Storage:Config:Directory',
+  'Settings:Storage:Security:DataProtectionKeysDirectory',
+].includes(field.key))
+const artworkFields = storageFields.filter((field) => [
+  'Settings:Storage:Artwork:PosterDirectory',
+  'Settings:Storage:Artwork:BackgroundDirectory',
+].includes(field.key))
+const managedStorageFields = storageFields.filter((field) => [
+  'Settings:Storage:Tools:Directory',
+  'Settings:Storage:Plugins:CommunityDirectory',
+  'Settings:Storage:Plugins:InstalledOfficialDirectory',
+].includes(field.key))
 
 const isPluginTab = computed(() => settingsTab.value.startsWith('plugin-nav:'))
 
@@ -493,65 +474,78 @@ async function sendInvite() {
 
               <template v-else-if="group.name === 'storage'">
                 <div class="storage-settings-intro q-mb-lg">
-                  <div class="text-subtitle1 text-weight-bold">Application data and media libraries</div>
-                  <div class="text-body2 text-grey-6 q-mt-xs">
-                    Application-managed files belong under the persistent data root. Catalog media is different: it can be very large and stays in the folder configured for each catalog.
+                  <div class="text-body2 text-grey-6">
+                    Application-managed files are grouped below. These paths are read-only here and come from your deployment configuration. Catalog media remains at the path set on each catalog.
                   </div>
                 </div>
-                <q-banner dense rounded class="storage-media-note q-mb-lg">
+
+                <q-card flat bordered dark class="storage-card q-mb-md">
+                  <q-card-section class="row items-center no-wrap q-gutter-md storage-card__header">
+                    <q-avatar rounded class="storage-card__icon storage-card__icon--blue">
+                      <q-icon name="inventory_2" />
+                    </q-avatar>
+                    <div class="col">
+                      <div class="text-subtitle1 text-weight-bold">Application data</div>
+                      <div class="text-caption text-grey-6">Persistent root, runtime configuration, and security keys.</div>
+                    </div>
+                    <q-badge outline color="grey-5" label="deployment managed" />
+                  </q-card-section>
+                  <q-separator dark />
+                  <q-card-section class="row q-col-gutter-md">
+                    <q-input
+                      v-for="field in applicationDataFields"
+                      :key="field.key"
+                      v-model="settingsValues[field.key]"
+                      dark outlined dense readonly
+                      :label="field.label"
+                      class="col-12 col-xl-4 storage-path-field"
+                    />
+                  </q-card-section>
+                </q-card>
+
+                <q-card flat bordered dark class="storage-card q-mb-md">
+                  <q-card-section class="row items-center no-wrap q-gutter-md storage-card__header">
+                    <q-avatar rounded class="storage-card__icon storage-card__icon--green">
+                      <q-icon name="folder_open" />
+                    </q-avatar>
+                    <div class="col">
+                      <div class="text-subtitle1 text-weight-bold">Managed file locations</div>
+                      <div class="text-caption text-grey-6">Directories for local artwork, tools, and installed plugins.</div>
+                    </div>
+                  </q-card-section>
+                  <q-separator dark />
+                  <q-card-section class="row q-col-gutter-xl">
+                    <div class="col-12 col-xl-6 storage-path-group">
+                      <div class="storage-path-group__title">Artwork</div>
+                      <q-input
+                        v-for="field in artworkFields"
+                        :key="field.key"
+                        v-model="settingsValues[field.key]"
+                        dark outlined dense readonly
+                        :label="field.label"
+                        class="q-mb-md storage-path-field"
+                      />
+                    </div>
+                    <div class="col-12 col-xl-6 storage-path-group">
+                      <div class="storage-path-group__title">Tools & plugins</div>
+                      <q-input
+                        v-for="field in managedStorageFields"
+                        :key="field.key"
+                        v-model="settingsValues[field.key]"
+                        dark outlined dense readonly
+                        :label="field.label"
+                        class="q-mb-md storage-path-field"
+                      />
+                    </div>
+                  </q-card-section>
+                </q-card>
+
+                <q-banner dense rounded class="storage-media-note">
                   <template #avatar><q-icon name="video_library" color="primary" /></template>
-                  <div class="text-weight-medium">Keep large media libraries separate when possible</div>
+                  <div class="text-weight-medium">Keep large media libraries separate</div>
                   <div class="text-caption text-grey-6 q-mt-xs">
-                    A separate host or NAS mount makes media easier to share with other apps and avoids mixing terabytes of media with the database and app state. In Docker, mount it at a stable path such as <code>/mnt/media</code>, then use that container path for the catalog. You can also store catalog media under <code>/data/media</code> if you choose.
+                    Catalog media is not stored in the application data directories. Mount a host or NAS library at a stable path such as <code>/mnt/media</code>, then use that container path when configuring a catalog.
                   </div>
-                </q-banner>
-                <template v-for="field in group.fields" :key="field.key">
-                  <q-select
-                    v-if="field.key === 'Settings:Db:Provider'"
-                    v-model="settingsValues[field.key]"
-                    :options="[{ label: 'SQLite', value: 'Sqlite' }, { label: 'PostgreSQL', value: 'PostgreSQL' }]"
-                    dark outlined dense emit-value map-options :label="field.label" class="q-mb-md"
-                  />
-                  <q-input
-                    v-else
-                    v-model="settingsValues[field.key]"
-                    dark outlined dense
-                    :label="field.label"
-                    :type="field.key === 'Settings:Db:Password' ? 'password' : 'text'"
-                    :placeholder="field.placeholder ?? ''"
-                    class="q-mb-md"
-                  />
-                </template>
-                <div class="storage-secret-card q-mt-md">
-                  <div class="text-weight-medium">Database password</div>
-                  <div class="text-caption text-grey-6 q-mt-xs">
-                    {{ settingsValues['Settings:Db:PasswordConfigured'] === 'true' ? 'A password is configured; its value is never shown.' : 'No password is saved. Deployment environment values still take precedence.' }}
-                  </div>
-                  <q-input
-                    v-model="databasePasswordInput"
-                    type="password"
-                    dark outlined dense
-                    label="Set or replace database password"
-                    autocomplete="new-password"
-                    class="q-mt-md"
-                  />
-                  <div class="row justify-end q-gutter-sm q-mt-sm">
-                    <q-btn
-                      v-if="settingsValues['Settings:Db:PasswordConfigured'] === 'true'"
-                      flat dense no-caps color="negative" label="Remove saved password"
-                      :loading="databasePasswordLoading" @click="clearDatabasePassword"
-                    />
-                    <q-btn
-                      unelevated dense no-caps color="primary" text-color="dark" icon="lock"
-                      label="Save encrypted password" :disable="!databasePasswordInput"
-                      :loading="databasePasswordLoading" @click="saveDatabasePassword"
-                    />
-                  </div>
-                  <q-banner v-if="databasePasswordMessage" dense rounded class="auth-message q-mt-sm">{{ databasePasswordMessage }}</q-banner>
-                  <q-banner v-if="databasePasswordError" dense rounded class="error-banner q-mt-sm">{{ databasePasswordError }}</q-banner>
-                </div>
-                <q-banner dense rounded class="q-mt-md">
-                  Environment variables override saved runtime values. Changing database provider or SQLite path requires a managed migration and restart.
                 </q-banner>
               </template>
 
@@ -849,6 +843,57 @@ async function sendInvite() {
 .settings-panels :deep(.q-tab-panel.users-tab-panel) {
   width: 100%;
   max-width: none;
+}
+
+.storage-settings-intro {
+  max-width: 850px;
+}
+
+.storage-card {
+  overflow: hidden;
+  border-color: rgba(150, 174, 211, 0.14);
+  border-radius: 15px;
+  background: linear-gradient(145deg, rgba(20, 30, 49, 0.96), rgba(13, 21, 36, 0.96));
+}
+
+.storage-card__header {
+  min-height: 82px;
+  padding: 17px 20px;
+}
+
+.storage-card__icon {
+  width: 42px;
+  height: 42px;
+  font-size: 21px;
+}
+
+.storage-card__icon--blue {
+  color: #91bdff;
+  background: rgba(75, 139, 229, 0.15);
+}
+
+.storage-card__icon--green {
+  color: #78d6b0;
+  background: rgba(62, 190, 139, 0.13);
+}
+
+.storage-path-group__title {
+  margin: 0 0 13px;
+  color: #aab8ce;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.storage-path-field :deep(.q-field__control) {
+  border-radius: 10px;
+  background: rgba(6, 12, 22, 0.28);
+}
+
+.storage-media-note {
+  max-width: 980px;
+  border: 1px solid rgba(115, 161, 224, 0.12);
+  border-radius: 12px;
 }
 
 .settings-panel--plugin-ui {
