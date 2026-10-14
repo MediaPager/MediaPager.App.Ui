@@ -563,8 +563,13 @@ body.mediapager-player-popout {
 
   .player-shell:not(.player-shell--mini) .player-card {
     width: 100vw;
-    height: 100%;
+    height: 100dvh;
     border-radius: 0;
+  }
+
+  .player-shell:not(.player-shell--mini) {
+    bottom: 0;
+    align-items: stretch;
   }
 
   .player-mini-dock {

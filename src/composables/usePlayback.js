@@ -30,6 +30,7 @@ const playbackVolume = ref(1)
 const playbackMuted = ref(false)
 const playbackRate = ref(1)
 let player = null
+let nativeFullscreenVideo = null
 let volumeAudioContext = null
 let volumeSourceNode = null
 let volumeGainNode = null
@@ -451,6 +452,13 @@ export function usePlayback() {
     })
     player.on('timeupdate', updatePlaybackMetrics)
     player.on('durationchange', updatePlaybackMetrics)
+    nativeFullscreenVideo = videoEl.value
+    nativeFullscreenVideo?.addEventListener('webkitbeginfullscreen', syncNativePlaybackState)
+    nativeFullscreenVideo?.addEventListener('webkitendfullscreen', syncNativePlaybackState)
+    nativeFullscreenVideo?.addEventListener('seeked', syncNativePlaybackState)
+    nativeFullscreenVideo?.addEventListener('timeupdate', syncNativePlaybackState)
+    nativeFullscreenVideo?.addEventListener('play', syncNativePlaybackState)
+    nativeFullscreenVideo?.addEventListener('pause', syncNativePlaybackState)
     window.removeEventListener('keydown', onPlayerKeydown)
     window.addEventListener('keydown', onPlayerKeydown)
     // Autoplay: the click that opened the player counts as a user gesture, so try
@@ -480,6 +488,12 @@ export function usePlayback() {
     playbackDuration.value = Number.isFinite(duration) ? duration : 0
   }
 
+  function syncNativePlaybackState() {
+    if (!player) return
+    playerPaused.value = player.paused()
+    updatePlaybackMetrics()
+  }
+
   function togglePlayback() {
     if (!player) return
     if (player.paused()) player.play()?.catch?.(() => {})
@@ -490,6 +504,7 @@ export function usePlayback() {
     if (!player || !Number.isFinite(Number(time))) return
     const duration = player.duration()
     player.currentTime(Number.isFinite(duration) ? Math.max(0, Math.min(duration, Number(time))) : Math.max(0, Number(time)))
+    updatePlaybackMetrics()
   }
 
   async function ensureVolumeAmplifier() {
@@ -588,6 +603,15 @@ export function usePlayback() {
 
   async function toggleFullscreen() {
     if (!player) return
+    const video = videoEl.value
+    if (video?.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
+      video.webkitExitFullscreen()
+      return
+    }
+    if (typeof video?.webkitEnterFullscreen === 'function') {
+      video.webkitEnterFullscreen()
+      return
+    }
     try {
       if (player.isFullscreen()) await player.exitFullscreen()
       else await player.requestFullscreen()
@@ -776,6 +800,13 @@ export function usePlayback() {
 
   function destroyPlayer() {
     window.removeEventListener('keydown', onPlayerKeydown)
+    nativeFullscreenVideo?.removeEventListener('webkitbeginfullscreen', syncNativePlaybackState)
+    nativeFullscreenVideo?.removeEventListener('webkitendfullscreen', syncNativePlaybackState)
+    nativeFullscreenVideo?.removeEventListener('seeked', syncNativePlaybackState)
+    nativeFullscreenVideo?.removeEventListener('timeupdate', syncNativePlaybackState)
+    nativeFullscreenVideo?.removeEventListener('play', syncNativePlaybackState)
+    nativeFullscreenVideo?.removeEventListener('pause', syncNativePlaybackState)
+    nativeFullscreenVideo = null
     if (playLoadingTimer) { clearTimeout(playLoadingTimer); playLoadingTimer = null }
     playLoading.value = false
     proxyUpgradePending = false

@@ -10,12 +10,20 @@ import ChangePasswordDialog from './ChangePasswordDialog.vue'
 
 const router = useRouter()
 
-const { accessToken, userScopes, currentUserEmail, setSession } = useAuth()
+const { accessToken, userScopes, currentUserEmail, setSession, signOut } = useAuth()
 const { autoplay, setAutoplay } = useUserSettings()
 const { subLang } = usePlayback()
 
 const profileTab = ref('player')
 const changePasswordOpen = ref(false)
+const mobileSessions = ref([])
+const mobileSessionsLoading = ref(false)
+const mobileSessionsError = ref('')
+const revokeDialogOpen = ref(false)
+const revokeTarget = ref(null)
+const revokePassword = ref('')
+const revokeLoading = ref(false)
+const revokeError = ref('')
 
 // ── Profile (GET /me) ──
 const profile = ref(null)
@@ -53,6 +61,58 @@ async function fetchProfile() {
   } finally {
     profileLoading.value = false
   }
+}
+
+async function fetchMobileSessions() {
+  mobileSessionsLoading.value = true
+  mobileSessionsError.value = ''
+  try {
+    const { data } = await api.get('/auth/mobile-sessions')
+    mobileSessions.value = data
+  } catch (requestError) {
+    mobileSessionsError.value = requestError.response?.data?.detail ?? requestError.response?.data?.error ?? 'Could not load app devices.'
+  } finally {
+    mobileSessionsLoading.value = false
+  }
+}
+
+function confirmRevokeSession(session) {
+  revokeTarget.value = session
+  revokePassword.value = ''
+  revokeError.value = ''
+  revokeDialogOpen.value = true
+}
+
+async function revokeMobileSession() {
+  if (!revokeTarget.value || !revokePassword.value) {
+    revokeError.value = 'Enter your current password to revoke this device.'
+    return
+  }
+  revokeLoading.value = true
+  revokeError.value = ''
+  try {
+    await api.delete(`/auth/mobile-sessions/${encodeURIComponent(revokeTarget.value.id)}`, {
+      data: { currentPassword: revokePassword.value },
+    })
+    const wasCurrentDevice = revokeTarget.value.isCurrentDevice
+    revokeDialogOpen.value = false
+    revokePassword.value = ''
+    revokeTarget.value = null
+    if (wasCurrentDevice) {
+      signOut()
+      router.replace('/')
+      return
+    }
+    await fetchMobileSessions()
+  } catch (requestError) {
+    revokeError.value = requestError.response?.data?.error ?? requestError.response?.data?.detail ?? 'Could not revoke this device.'
+  } finally {
+    revokeLoading.value = false
+  }
+}
+
+function formatSessionDate(value) {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 
 async function saveAccount() {
@@ -126,7 +186,10 @@ function openEmailForm() {
   emailFormOpen.value = true
 }
 
-onMounted(fetchProfile)
+onMounted(() => {
+  void fetchProfile()
+  void fetchMobileSessions()
+})
 </script>
 
 <template>
@@ -320,6 +383,34 @@ onMounted(fetchProfile)
                   Requires your current password. Other sessions are signed out after a change.
                 </div>
               </div>
+
+              <div class="profile-section">
+                <div class="profile-section-title">Mobile app devices</div>
+                <div class="text-caption text-grey-6 q-mb-sm">
+                  App sessions can stay signed in for up to 90 days. Revoking a device stops refresh and invalidates its current access token.
+                </div>
+                <q-banner v-if="mobileSessionsError" dense class="error-banner q-mb-sm">{{ mobileSessionsError }}</q-banner>
+                <div v-if="mobileSessionsLoading" class="flex flex-center q-pa-md">
+                  <q-spinner-dots color="primary" size="1.5rem" />
+                </div>
+                <q-list v-else-if="mobileSessions.length" bordered separator class="mobile-session-list">
+                  <q-item v-for="session in mobileSessions" :key="session.id">
+                    <q-item-section avatar><q-icon name="phone_iphone" color="primary" /></q-item-section>
+                    <q-item-section>
+                      <q-item-label>
+                        {{ session.deviceName }}
+                        <q-badge v-if="session.isCurrentDevice" color="primary" text-color="dark" class="q-ml-sm">this device</q-badge>
+                      </q-item-label>
+                      <q-item-label caption>Last active {{ formatSessionDate(session.lastUsedAt) }}</q-item-label>
+                      <q-item-label caption>Expires {{ formatSessionDate(session.expiresAt) }}</q-item-label>
+                    </q-item-section>
+                    <q-item-section side>
+                      <q-btn flat dense color="negative" icon="logout" label="Revoke" @click="confirmRevokeSession(session)" />
+                    </q-item-section>
+                  </q-item>
+                </q-list>
+                <div v-else-if="!mobileSessionsError" class="text-caption text-grey-6">No MediaPager app devices are signed in.</div>
+              </div>
             </q-tab-panel>
           </q-tab-panels>
         </div>
@@ -327,5 +418,29 @@ onMounted(fetchProfile)
     </div>
 
     <ChangePasswordDialog v-model:open="changePasswordOpen" />
+    <q-dialog v-model="revokeDialogOpen">
+      <q-card dark class="auth-card revoke-device-card">
+        <div class="auth-title">Revoke app device?</div>
+        <p class="text-grey-5">{{ revokeTarget?.deviceName }} will be signed out and will need to connect again.</p>
+        <q-banner v-if="revokeError" dense class="error-banner q-mb-md">{{ revokeError }}</q-banner>
+        <q-form class="column q-gutter-sm" @submit.prevent="revokeMobileSession">
+          <q-input
+            v-model="revokePassword"
+            dark
+            outlined
+            dense
+            type="password"
+            autocomplete="current-password"
+            label="Current password"
+            autofocus
+            required
+          />
+          <div class="row q-gutter-sm justify-end q-mt-sm">
+            <q-btn flat color="grey-5" label="cancel" :disable="revokeLoading" @click="revokeDialogOpen = false" />
+            <q-btn type="submit" unelevated color="negative" label="revoke device" :loading="revokeLoading" />
+          </div>
+        </q-form>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>

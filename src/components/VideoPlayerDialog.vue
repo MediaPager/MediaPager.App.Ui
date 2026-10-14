@@ -136,6 +136,11 @@ function restoreMiniPlayer() {
   if (playerMinimized.value) togglePlayerMinimized()
 }
 
+function pauseAndMinimizePlayer() {
+  if (!playerPaused.value) togglePlayback()
+  if (!playerMinimized.value) togglePlayerMinimized()
+}
+
 function showAirPlayPicker() {
   const video = videoEl.value
   if (typeof video?.webkitShowPlaybackTargetPicker === 'function')
@@ -602,7 +607,15 @@ function formatTime(seconds) {
             :disable="!videoEl || !playerControls"
             @click="popOutPlayer"
           />
-          <q-btn dense flat round icon="minimize" aria-label="Minimize player" title="Minimize player" @click="togglePlayerMinimized" />
+          <q-btn
+            dense
+            flat
+            round
+            :icon="isTouchDevice ? 'close' : 'minimize'"
+            :aria-label="isTouchDevice ? 'Pause and minimize player' : 'Minimize player'"
+            :title="isTouchDevice ? 'Pause and minimize player' : 'Minimize player'"
+            @click="isTouchDevice ? pauseAndMinimizePlayer() : togglePlayerMinimized()"
+          />
         </q-bar>
 
         <div ref="playerContent" class="player-content col" :class="{ 'player-content--hidden': playerMinimized }">
