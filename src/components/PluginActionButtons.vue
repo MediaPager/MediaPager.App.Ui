@@ -30,6 +30,7 @@ const kindAliases = {
   tv: 'tv', 'tv-show': 'tv', 'tv-shows': 'tv', tvshows: 'tv',
   music: 'music', podcast: 'podcast', podcasts: 'podcast',
   audiobook: 'audiobook', audiobooks: 'audiobook', book: 'book', books: 'book',
+  document: 'document', documents: 'document', doc: 'document', docs: 'document',
 }
 
 function normalizeKind(kind) {

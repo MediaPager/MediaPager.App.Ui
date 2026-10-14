@@ -1,6 +1,8 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { Notify } from 'quasar'
+import { api } from '../composables/useApi'
 import { useMovies } from '../composables/useMovies'
 import { useTvShows } from '../composables/useTvShows'
 import { builtinStreamTabs, useStreamTabs } from '../composables/useStreamTabs'
@@ -16,6 +18,9 @@ import NotFoundPage from './NotFoundPage.vue'
 import NoCatalogsScreen from './NoCatalogsScreen.vue'
 import CatalogItemEditDialog from './CatalogItemEditDialog.vue'
 import CatalogUploadDialog from './CatalogUploadDialog.vue'
+import DocToolsDialog from './DocToolsDialog.vue'
+import DocEditorDialog from './DocEditorDialog.vue'
+import DocsExplorer from './DocsExplorer.vue'
 import MusicCatalogBrowser from './MusicCatalogBrowser.vue'
 import ItemRatingMenu from './ItemRatingMenu.vue'
 import PluginActionButtons from './PluginActionButtons.vue'
@@ -91,7 +96,12 @@ const {
   clearEditItemRequest,
 } = useCatalogItems()
 const { jobs: pluginJobs } = usePluginActivity()
-const { canEditCatalogs } = useAuth()
+const { canEditCatalogs, canEditSettings } = useAuth()
+const docToolsDialogOpen = ref(false)
+const docEditorOpen = ref(false)
+const docEditorCatalog = ref(null)
+const docEditorEntry = ref(null)
+const docEditorTool = ref(null)
 const seenCompletedJobIds = new Set()
 const filterYears = Array.from({ length: new Date().getFullYear() - 1870 + 1 }, (_, index) => {
   const value = new Date().getFullYear() - index
@@ -444,6 +454,10 @@ function openItemEditor(item) {
 }
 
 function openCatalogItemDetails(item) {
+  if (selectedCatalog.value?.catalogType?.slug === 'docs') {
+    void openCatalogDocument(item)
+    return
+  }
   if (selectedCatalog.value?.catalogType?.slug === 'tv-shows') {
     const tmdbId = Number(item.externalId)
     if (Number.isSafeInteger(tmdbId) && tmdbId > 0) {
@@ -461,6 +475,33 @@ function openCatalogItemDetails(item) {
     }
   }
   return openLocalDetails(item)
+}
+
+async function openCatalogDocument(item) {
+  // Open a blank tab synchronously from the user's click so browser popup blockers
+  // allow the capability URL to be assigned once the authenticated API call returns.
+  const documentWindow = window.open('about:blank', '_blank')
+  if (!documentWindow) {
+    Notify.create({ type: 'warning', message: 'Allow pop-ups to open documents from this catalog.' })
+    return
+  }
+  documentWindow.opener = null
+  documentWindow.document.title = item.title ?? 'Document'
+  try {
+    const { data } = await api.post(`/catalog-items/${encodeURIComponent(item.id)}/local`)
+    documentWindow.location.replace(data.url)
+  } catch (requestError) {
+    documentWindow.close()
+    const message = requestError.response?.data?.detail ?? requestError.response?.data?.error ?? 'Could not open this document.'
+    Notify.create({ type: 'negative', message })
+  }
+}
+
+function openDocEditor({ catalog, entry, tool }) {
+  docEditorCatalog.value = catalog
+  docEditorEntry.value = entry
+  docEditorTool.value = tool
+  docEditorOpen.value = true
 }
 
 async function onCatalogItemCreated() {
@@ -597,7 +638,7 @@ function onDragEnd() {
           </template>
         </q-tabs>
 
-        <q-list v-if="!reorderMode && pluginMainNav.length" dense class="plugin-main-nav">
+        <q-list v-if="!reorderMode && (pluginMainNav.length || canEditSettings)" dense class="plugin-main-nav">
           <q-item
             v-for="entry in pluginMainNav"
             :key="entry.key"
@@ -606,6 +647,10 @@ function onDragEnd() {
           >
             <q-item-section avatar><q-icon :name="entry.icon || 'extension'" /></q-item-section>
             <q-item-section>{{ entry.label }}</q-item-section>
+          </q-item>
+          <q-item v-if="canEditSettings" clickable @click="docToolsDialogOpen = true; closeMobileNav()">
+            <q-item-section avatar><q-icon name="build" /></q-item-section>
+            <q-item-section>Doc Tools</q-item-section>
           </q-item>
         </q-list>
 
@@ -976,6 +1021,7 @@ function onDragEnd() {
                 <q-icon
                   :name="selectedCatalog.catalogType.mediaType.slug === 'video' ? 'movie'
                     : selectedCatalog.catalogType.mediaType.slug === 'audio' ? 'headphones'
+                    : selectedCatalog.catalogType.mediaType.slug === 'documents' ? 'description'
                     : 'menu_book'"
                   size="1.5rem"
                   color="primary"
@@ -994,12 +1040,12 @@ function onDragEnd() {
               </div>
               <q-space />
               <q-btn
-                v-if="canEditCatalogs"
+                v-if="canEditCatalogs && selectedCatalog.catalogType.slug !== 'docs'"
                 unelevated
                 color="primary"
                 text-color="dark"
                 icon="upload_file"
-                label="Add media"
+                :label="selectedCatalog.catalogType.slug === 'docs' ? 'Add document' : 'Add media'"
                 :disable="!selectedCatalog.path"
                 :title="selectedCatalog.path ? 'Upload media into this catalog' : 'Set a folder path for this catalog first'"
                 @click="catalogUploadOpen = true"
@@ -1013,8 +1059,17 @@ function onDragEnd() {
               {{ itemsError }}
             </q-banner>
 
+            <DocsExplorer
+              v-if="selectedCatalog.catalogType.slug === 'docs'"
+              :key="selectedCatalog.id"
+              :catalog="selectedCatalog"
+              :can-edit-catalogs="canEditCatalogs"
+              @add-document="onCatalogItemCreated"
+              @open-document="openDocEditor"
+            />
+
             <MusicCatalogBrowser
-              v-if="selectedCatalog.catalogType.slug === 'music'"
+              v-else-if="selectedCatalog.catalogType.slug === 'music'"
               :key="selectedCatalog.id"
               :catalog="selectedCatalog"
               :can-edit-catalogs="canEditCatalogs"
@@ -1047,7 +1102,7 @@ function onDragEnd() {
                     >
                       <template #error>
                         <div class="poster-fallback absolute-full flex flex-center">
-                          <q-icon name="local_movies" size="2rem" color="grey-7" />
+                        <q-icon :name="selectedCatalog.catalogType.slug === 'docs' ? 'description' : 'local_movies'" size="2rem" color="grey-7" />
                         </div>
                       </template>
                     </q-img>
@@ -1072,7 +1127,7 @@ function onDragEnd() {
                     <div v-if="!isTouchDevice" class="absolute-bottom-left q-ma-xs">
                       <item-rating-menu :item="item" size="sm" />
                     </div>
-                    <div class="play-overlay absolute-full flex flex-center">
+                    <div v-if="selectedCatalog.catalogType.slug !== 'docs'" class="play-overlay absolute-full flex flex-center">
                       <q-btn
                         round
                         unelevated
@@ -1151,6 +1206,13 @@ function onDragEnd() {
       v-model:open="catalogUploadOpen"
       :catalog="selectedCatalog"
       @created="onCatalogItemCreated"
+    />
+    <DocToolsDialog v-model:open="docToolsDialogOpen" :can-manage="canEditSettings" />
+    <DocEditorDialog
+      v-model:open="docEditorOpen"
+      :catalog="docEditorCatalog"
+      :entry="docEditorEntry"
+      :tool="docEditorTool"
     />
   </q-page>
 </template>

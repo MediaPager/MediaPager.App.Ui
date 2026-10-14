@@ -45,6 +45,21 @@ const { navCatalogs, fetchNavCatalogs } = useCatalogs()
 // One unified search box, the same on every tab: it type-aheads across all media
 // categories. Provider-backed kinds can be selected and played directly from the results.
 const searchText = ref('')
+const searchScope = ref('all')
+const searchScopeOptions = [
+  { label: 'All', value: 'all' },
+  { label: 'Video', value: 'media:video' },
+  { label: 'Movies', value: 'catalog:movies' },
+  { label: 'TV Shows', value: 'catalog:tv-shows' },
+  { label: 'Audio', value: 'media:audio' },
+  { label: 'Music', value: 'catalog:music' },
+  { label: 'Podcasts', value: 'catalog:podcasts' },
+  { label: 'Audiobooks', value: 'catalog:audiobooks' },
+  { label: 'Books', value: 'media:book' },
+  { label: 'Books catalog', value: 'catalog:books' },
+  { label: 'Documents', value: 'media:documents' },
+  { label: 'Docs', value: 'catalog:docs' },
+]
 const searchSubmitting = ref(false)
 let searchSubmitSequence = 0
 const isTvSearch = computed(() => streamTab.value === 'tv')
@@ -79,7 +94,24 @@ const kindMeta = {
   podcast: { label: 'Podcast', icon: 'podcasts' },
   audiobook: { label: 'Audio Book', icon: 'headphones' },
   book: { label: 'Book', icon: 'menu_book' },
+  document: { label: 'Document', icon: 'description' },
   music: { label: 'Music', icon: 'album' },
+}
+
+function searchScopeParams() {
+  if (searchScope.value.startsWith('media:'))
+    return { mediaTypeSlug: searchScope.value.slice('media:'.length) }
+  if (searchScope.value.startsWith('catalog:'))
+    return { catalogTypeSlug: searchScope.value.slice('catalog:'.length) }
+  return {}
+}
+
+function onSearchScopeChange() {
+  if (searchText.value.trim().length >= 2) {
+    openTypeahead()
+    typeaheadLoading.value = true
+    scheduleTypeahead()
+  }
 }
 
 function searchTriggerEl() {
@@ -175,7 +207,7 @@ async function runTypeahead(text) {
   typeaheadController = controller
   try {
     const { data } = await api.get('/search', {
-      params: { q: text, limit: 5 },
+      params: { q: text, limit: 5, ...searchScopeParams() },
       signal: controller.signal,
     })
     if (controller.signal.aborted || searchText.value.trim() !== text) return
@@ -227,6 +259,10 @@ function searchQueueItem(hit) {
 
 function playSearchHit(hit) {
   closeTypeahead()
+  if (hit.kind === 'document' && hit.catalogItemId != null) {
+    void pickSearchResult(hit)
+    return
+  }
   const item = searchQueueItem(hit)
   if (item.localOnly) return onPlay({ ...item, sourceKey: null })
   if (item.sourceKey) return onPlaySourceItem(item, item.sourceKey)
@@ -297,8 +333,38 @@ async function pickSearchResult(hit) {
 
 async function doSearch() {
   const submitSequence = ++searchSubmitSequence
-  closeTypeahead()
   const text = searchText.value.trim()
+  if (searchScope.value !== 'all') {
+    closeTypeahead()
+    if (text.length < 2) return
+    openTypeahead()
+    typeaheadLoading.value = true
+    searchSubmitting.value = true
+    const controller = new AbortController()
+    typeaheadController = controller
+    try {
+      const { data } = await api.get('/search', {
+        params: { q: text, limit: 10, ...searchScopeParams() },
+        signal: controller.signal,
+      })
+      if (!controller.signal.aborted && searchText.value.trim() === text && submitSequence === searchSubmitSequence) {
+        typeaheadResults.value = data
+        positionTypeahead()
+      }
+      return
+    } catch {
+      if (!controller.signal.aborted && submitSequence === searchSubmitSequence) typeaheadResults.value = []
+      return
+    } finally {
+      if (typeaheadController === controller) {
+        typeaheadController = null
+        typeaheadLoading.value = false
+      }
+      if (submitSequence === searchSubmitSequence) searchSubmitting.value = false
+    }
+  }
+
+  closeTypeahead()
   searchSubmitting.value = true
   try {
     if (activeSourceKey.value) {
@@ -362,6 +428,11 @@ function openProfile() {
         @update:model-value="onSearchInput"
         @keyup.enter="doSearch"
       >
+        <template #prepend>
+          <select v-model="searchScope" class="search-scope-select" aria-label="Search scope" @change="onSearchScopeChange">
+            <option v-for="scope in searchScopeOptions" :key="scope.value" :value="scope.value">{{ scope.label }}</option>
+          </select>
+        </template>
         <template #append>
           <q-spinner-dots v-if="searchSubmitting" color="primary" size="1.35rem" aria-label="Searching" />
           <q-btn v-else flat round dense icon="search" color="primary" aria-label="Search" @click="doSearch" />
@@ -461,6 +532,11 @@ function openProfile() {
         @update:model-value="onSearchInput"
         @keyup.enter="doSearch"
       >
+        <template #prepend>
+          <select v-model="searchScope" class="search-scope-select" aria-label="Search scope" @change="onSearchScopeChange">
+            <option v-for="scope in searchScopeOptions" :key="scope.value" :value="scope.value">{{ scope.label }}</option>
+          </select>
+        </template>
         <template #append>
           <q-spinner-dots v-if="searchSubmitting" color="primary" size="1.35rem" aria-label="Searching" />
           <q-btn v-else flat round dense icon="search" color="primary" aria-label="Search" @click="doSearch" />
@@ -530,7 +606,7 @@ function openProfile() {
               :label="kindMeta[hit.kind]?.label ?? hit.kind"
               class="typeahead-badge"
             />
-            <div class="typeahead-actions row items-center no-wrap">
+            <div v-if="hit.kind !== 'document'" class="typeahead-actions row items-center no-wrap">
               <q-btn
                 flat
                 round
@@ -555,7 +631,7 @@ function openProfile() {
           </div>
         </template>
         <div v-else role="button" tabindex="0" class="typeahead-empty" @click="doSearch" @keydown.enter.prevent="doSearch">
-          no matches across movies, TV, music, books…
+          no matches in {{ searchScopeOptions.find(scope => scope.value === searchScope)?.label ?? 'all media' }}…
         </div>
       </div>
     </Transition>

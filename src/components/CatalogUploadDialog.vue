@@ -40,6 +40,8 @@ const metadataKind = computed(() => ({
 const accept = computed(() => {
   if (catalogTypeSlug.value === 'movies' || catalogTypeSlug.value === 'tv-shows')
     return 'video/*,.mkv,.avi,.mov,.m4v,.ts'
+  if (catalogTypeSlug.value === 'docs')
+    return '.pdf,.doc,.docx,.odt,.rtf,.txt,.md,.csv,.xls,.xlsx,.ppt,.pptx,.odp,.ods'
   if (catalogTypeSlug.value === 'books')
     return '.pdf,.epub,.mobi,.azw,.azw3,.cbz,.cbr,.txt,.rtf'
   return 'audio/*,.m4b,.flac,.opus,.wma'

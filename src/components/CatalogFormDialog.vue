@@ -19,6 +19,7 @@ const loading = ref(false)
 const isEdit = computed(() => Boolean(catalog.value))
 const title = computed(() => (isEdit.value ? 'Edit catalog' : 'New catalog'))
 const submitLabel = computed(() => (isEdit.value ? 'save changes' : 'create catalog'))
+const isDocsCatalog = computed(() => catalogTypes.value.some(type => type.id === catalogTypeId.value && type.slug === 'docs'))
 
 async function onShow() {
   error.value = ''
@@ -123,12 +124,16 @@ async function submit() {
           dense
           label="Folder path (required)"
           required
-          placeholder="/mnt/media/my-movies or ~/Movies"
+          :placeholder="isDocsCatalog ? '/mnt/media/documents' : '/mnt/media/my-movies'"
         >
           <template #append>
             <q-icon name="folder" color="primary" />
           </template>
         </q-input>
+        <div v-if="isDocsCatalog" class="text-caption text-grey-5">
+          Use the folder path as seen by the MediaPager API. In Docker, mount your host folder into the container at this path.
+          Documents appear in the catalog and supported files open in their editor when selected.
+        </div>
         <div class="row q-gutter-sm justify-end q-mt-sm">
           <q-btn flat dense color="grey-5" label="cancel" @click="open = false" />
           <q-btn
