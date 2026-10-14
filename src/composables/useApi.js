@@ -1,10 +1,11 @@
 import axios from 'axios'
+import { configuredApiBaseUrl } from '../apiBaseUrl'
 
 // Single shared axios instance. The launcher serves runtime-config.json next to the
 // UI so the API URL can change without a rebuild; main.js awaits loadRuntimeConfig()
 // before mounting so no API call ever fires against the placeholder base.
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL ?? '/',
+  baseURL: configuredApiBaseUrl(import.meta.env.VITE_API_BASE_URL),
 })
 
 export async function loadRuntimeConfig() {

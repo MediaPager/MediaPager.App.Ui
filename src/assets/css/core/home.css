@@ -159,11 +159,40 @@
 }
 
 .home-panel {
+  position: relative;
   flex: 1;
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding: 16px;
+}
+
+.home-panel > :not(.home-pull-refresh-indicator) {
+  transition: transform 180ms ease-out;
+}
+
+.home-panel--pulling > :not(.home-pull-refresh-indicator) {
+  transform: translateY(var(--pull-refresh-offset, 0px));
+  transition: none;
+}
+
+.home-pull-refresh-indicator {
+  position: absolute;
+  z-index: 30;
+  top: calc(var(--pull-refresh-offset, 0px) - 34px);
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.home-pull-refresh-indicator--ready {
+  color: #45a8ff;
 }
 
 .home-panel.home-panel--with-tabs {

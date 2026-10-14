@@ -12,12 +12,12 @@ import { useSources } from '../composables/useSources'
 import MediaDetailsActions from './MediaDetailsActions.vue'
 import PluginActionButtons from './PluginActionButtons.vue'
 
-const { error } = useMovies()
+const { error, isTouchDevice } = useMovies()
 const { localItemFor, requestEditItem } = useCatalogItems()
 const { canEditCatalogs } = useAuth()
 const { addToQueue } = usePlaylist()
 const { defaultTvSourceKey } = useSources()
-const { currentMovie, onPlayEpisode, setTvNextHandler } = usePlayback()
+const { currentMovie, onPlayEpisode, setTvNextHandler, beginPlayLoading, cancelPlayLoading } = usePlayback()
 const { autoplay } = useUserSettings()
 
 const {
@@ -172,8 +172,15 @@ async function firstSeriesEpisode() {
 }
 
 async function playFirstEpisode() {
+  if (isTouchDevice) {
+    tvSheetOpen.value = false
+    beginPlayLoading()
+  }
   const first = await firstSeriesEpisode()
-  if (!first) return
+  if (!first) {
+    if (isTouchDevice) cancelPlayLoading()
+    return
+  }
   selectedSeason.value = first.seasonNumber
   return playEpisode(first.episode, first.seasonNumber)
 }

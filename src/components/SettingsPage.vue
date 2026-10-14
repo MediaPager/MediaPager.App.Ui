@@ -18,6 +18,7 @@ import NotFoundPage from './NotFoundPage.vue'
 import UsersPanel from './UsersPanel.vue'
 
 const { canInvite, canEditSettings, canEditCatalogs, isSuperAdmin } = useAuth()
+const mobileNavOpen = defineModel('mobileNavOpen', { type: Boolean, default: false })
 const {
   settingsTab,
   settingsValues,
@@ -342,40 +343,24 @@ async function sendInvite() {
 <template>
   <q-page class="settings-page">
     <div class="settings-layout">
-      <div class="settings-topbar">
-        <div class="settings-title">Settings</div>
-        <q-btn
-          v-if="canEditSettings && settingsTab !== 'catalogs' && settingsTab !== 'setup' && settingsTab !== 'plugins' && !isPluginTab"
-          unelevated
-          color="primary"
-          text-color="dark"
-          icon="save"
-          label="save"
-          :loading="settingsLoading"
-          @click="saveAndRefresh"
-        />
-        <q-btn
-          v-else-if="settingsTab === 'catalogs' && canEditCatalogs"
-          unelevated
-          color="primary"
-          text-color="dark"
-          icon="add"
-          label="new catalog"
-          @click="openCreateCatalog"
-        />
-      </div>
-
       <div class="settings-body">
         <q-tabs
           v-model="settingsTab"
           vertical
           dark
           class="settings-nav"
+          :class="{ 'settings-nav--mobile-open': mobileNavOpen }"
           active-color="primary"
           indicator-color="primary"
+          @update:model-value="mobileNavOpen = false"
         >
           <q-tab v-for="group in visibleGroups" :key="group.name" :name="group.name" :label="group.label" :icon="group.icon" />
         </q-tabs>
+        <div
+          v-if="mobileNavOpen"
+          class="settings-nav-backdrop"
+          @click="mobileNavOpen = false"
+        />
 
         <div class="settings-panel" :class="{ 'settings-panel--plugin-ui': isPluginTab }">
           <NotFoundPage v-if="settingsTabNotFound" />
@@ -398,7 +383,28 @@ async function sendInvite() {
                 'plugin-ui-tab-panel': group.pluginNav && group.uiPath,
               }"
             >
-              <div class="panel-title q-mb-md">{{ group.label }}</div>
+              <div class="settings-panel-heading row items-center justify-between q-mb-md">
+                <div class="panel-title">{{ group.label }}</div>
+                <q-btn
+                  v-if="canEditSettings && group.name === settingsTab && group.name !== 'catalogs' && group.name !== 'setup' && group.name !== 'plugins' && !group.pluginNav"
+                  unelevated
+                  color="primary"
+                  text-color="dark"
+                  icon="save"
+                  label="save"
+                  :loading="settingsLoading"
+                  @click="saveAndRefresh"
+                />
+                <q-btn
+                  v-else-if="group.name === 'catalogs' && canEditCatalogs"
+                  unelevated
+                  color="primary"
+                  text-color="dark"
+                  icon="add"
+                  label="new catalog"
+                  @click="openCreateCatalog"
+                />
+              </div>
 
               <template v-if="group.manage">
                 <PluginsPanel @open-settings="openPluginSettings" />

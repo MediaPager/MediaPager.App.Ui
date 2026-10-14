@@ -86,6 +86,11 @@ onMounted(() => {
           v-if="currentRoute.name === 'stream' || currentRoute.name === 'catalog'"
           v-model:mobile-nav-open="mobileNavOpen"
         />
+        <component
+          :is="Component"
+          v-else-if="currentRoute.name === 'settings'"
+          v-model:mobile-nav-open="mobileNavOpen"
+        />
         <component v-else :is="Component" />
       </router-view>
     </q-page-container>

@@ -31,7 +31,9 @@ const router = useRouter()
 const settingsOpen = computed(() => route.name === 'settings')
 
 const { currentUserEmail, userScopes, userInitial, isSuperAdmin, canInvite, canEditSettings } = useAuth()
-const { query, search, openDetails } = useMovies()
+const inMobileApp = typeof window !== 'undefined' &&
+  typeof window.MediaPagerApp?.postMessage === 'function'
+const { query, search, openDetails, isTouchDevice } = useMovies()
 const { onPlay, onPlaySourceItem } = usePlayback()
 const { playlistDrawerOpen, queue, addToQueue } = usePlaylist()
 const { openSourceDetails } = useMediaDetails()
@@ -73,6 +75,34 @@ const activeSourceKey = computed(() => {
   return null
 })
 const searchPlaceholder = 'search movies, TV, music, books…'
+const streamTabToCatalogType = {
+  movies: 'movies',
+  tv: 'tv-shows',
+  music: 'music',
+  podcasts: 'podcasts',
+  audiobooks: 'audiobooks',
+  books: 'books',
+}
+const effectiveSearchScope = computed(() => {
+  if (!isTouchDevice) return searchScope.value
+  if (route.name === 'catalog') {
+    const catalog = navCatalogs.value.find((entry) => entry.name === route.params.name)
+    if (catalog) return `catalog-id:${catalog.id}`
+    return 'all'
+  }
+  if (route.name === 'stream') {
+    const catalogType = streamTabToCatalogType[activeMediaKind.value]
+    return catalogType ? `catalog:${catalogType}` : 'all'
+  }
+  return 'all'
+})
+const effectiveSearchScopeLabel = computed(() => {
+  if (effectiveSearchScope.value.startsWith('catalog-id:')) {
+    const catalogId = Number(effectiveSearchScope.value.slice('catalog-id:'.length))
+    return navCatalogs.value.find((catalog) => catalog.id === catalogId)?.name ?? 'catalog'
+  }
+  return searchScopeOptions.find((scope) => scope.value === effectiveSearchScope.value)?.label ?? 'all media'
+})
 
 // Debounced type-ahead. The dropdown is a plain fixed-position popup positioned
 // from whichever search input is focused (desktop toolbar vs the mobile bar).
@@ -98,11 +128,15 @@ const kindMeta = {
   music: { label: 'Music', icon: 'album' },
 }
 
-function searchScopeParams() {
-  if (searchScope.value.startsWith('media:'))
-    return { mediaTypeSlug: searchScope.value.slice('media:'.length) }
-  if (searchScope.value.startsWith('catalog:'))
-    return { catalogTypeSlug: searchScope.value.slice('catalog:'.length) }
+function searchScopeParams(scope = effectiveSearchScope.value) {
+  if (scope.startsWith('catalog-id:')) {
+    const catalogId = Number(scope.slice('catalog-id:'.length))
+    return Number.isSafeInteger(catalogId) && catalogId > 0 ? { catalogId } : {}
+  }
+  if (scope.startsWith('media:'))
+    return { mediaTypeSlug: scope.slice('media:'.length) }
+  if (scope.startsWith('catalog:'))
+    return { catalogTypeSlug: scope.slice('catalog:'.length) }
   return {}
 }
 
@@ -334,7 +368,7 @@ async function pickSearchResult(hit) {
 async function doSearch() {
   const submitSequence = ++searchSubmitSequence
   const text = searchText.value.trim()
-  if (searchScope.value !== 'all') {
+  if (effectiveSearchScope.value !== 'all') {
     closeTypeahead()
     if (text.length < 2) return
     openTypeahead()
@@ -389,12 +423,21 @@ function cleanupTypeahead() {
 onBeforeUnmount(cleanupTypeahead)
 
 function openSettings() {
+  mobileNavOpen.value = false
   if (canEditSettings.value) loadSettings()
   router.push({ name: 'settings', params: { tab: !isSuperAdmin.value && canInvite.value ? 'users' : 'general' } })
 }
 
 function openProfile() {
   router.push({ name: 'profile' })
+}
+
+function backToServerList() {
+  window.MediaPagerApp?.postMessage('backToServers')
+}
+
+function toggleMobileNavigation() {
+  mobileNavOpen.value = !mobileNavOpen.value
 }
 </script>
 
@@ -408,7 +451,7 @@ function openProfile() {
         icon="menu"
         aria-label="Navigation"
         class="mobile-nav-btn"
-        @click="mobileNavOpen = !mobileNavOpen"
+        @click="toggleMobileNavigation"
       />
       <q-toolbar-title class="brand brand-home" @click="router.push('/')">
         <img :src="appIcon" alt="" class="brand-icon" />
@@ -429,7 +472,7 @@ function openProfile() {
         @keyup.enter="doSearch"
       >
         <template #prepend>
-          <select v-model="searchScope" class="search-scope-select" aria-label="Search scope" @change="onSearchScopeChange">
+          <select v-if="!isTouchDevice" v-model="searchScope" class="search-scope-select" aria-label="Search scope" @change="onSearchScopeChange">
             <option v-for="scope in searchScopeOptions" :key="scope.value" :value="scope.value">{{ scope.label }}</option>
           </select>
         </template>
@@ -439,7 +482,7 @@ function openProfile() {
         </template>
       </q-input>
       <q-btn
-        v-if="!settingsOpen"
+        v-if="!settingsOpen && !isTouchDevice"
         flat
         round
         dense
@@ -452,6 +495,19 @@ function openProfile() {
         <q-badge v-if="queue.length" color="primary" text-color="dark" floating>{{ queue.length }}</q-badge>
       </q-btn>
       <q-space />
+      <q-btn
+        v-if="!settingsOpen && isTouchDevice"
+        flat
+        round
+        dense
+        icon="queue_music"
+        aria-label="Open queue and playlists"
+        title="Queue and playlists"
+        class="mobile-playlist-button q-ml-sm"
+        @click="togglePlaylistDrawer"
+      >
+        <q-badge v-if="queue.length" color="primary" text-color="dark" floating>{{ queue.length }}</q-badge>
+      </q-btn>
       <q-btn
         flat
         round
@@ -482,6 +538,15 @@ function openProfile() {
               </q-item-section>
             </q-item>
             <q-separator dark class="q-my-xs" />
+            <q-item
+              v-if="inMobileApp"
+              clickable
+              v-close-popup
+              @click="backToServerList"
+            >
+              <q-item-section avatar><q-icon name="dns" /></q-item-section>
+              <q-item-section>Back to servers</q-item-section>
+            </q-item>
             <q-item clickable v-close-popup @click="openProfile">
               <q-item-section avatar>
                 <q-icon name="account_circle" />
@@ -533,7 +598,7 @@ function openProfile() {
         @keyup.enter="doSearch"
       >
         <template #prepend>
-          <select v-model="searchScope" class="search-scope-select" aria-label="Search scope" @change="onSearchScopeChange">
+          <select v-if="!isTouchDevice" v-model="searchScope" class="search-scope-select" aria-label="Search scope" @change="onSearchScopeChange">
             <option v-for="scope in searchScopeOptions" :key="scope.value" :value="scope.value">{{ scope.label }}</option>
           </select>
         </template>
@@ -542,17 +607,6 @@ function openProfile() {
           <q-btn v-else flat round dense icon="search" color="primary" aria-label="Search" @click="doSearch" />
         </template>
       </q-input>
-      <q-btn
-        flat
-        round
-        dense
-        icon="queue_music"
-        aria-label="Open queue and playlists"
-        title="Queue and playlists"
-        @click="togglePlaylistDrawer"
-      >
-        <q-badge v-if="queue.length" color="primary" text-color="dark" floating>{{ queue.length }}</q-badge>
-      </q-btn>
     </q-toolbar>
 
     <!-- type-ahead dropdown; fixed-position, anchored to whichever search input has focus -->
@@ -631,7 +685,7 @@ function openProfile() {
           </div>
         </template>
         <div v-else role="button" tabindex="0" class="typeahead-empty" @click="doSearch" @keydown.enter.prevent="doSearch">
-          no matches in {{ searchScopeOptions.find(scope => scope.value === searchScope)?.label ?? 'all media' }}…
+          no matches in {{ effectiveSearchScopeLabel }}…
         </div>
       </div>
     </Transition>

@@ -17,6 +17,9 @@
 
 @import './mobile.css';
 @import './desktop.css';
+@import './platform/ios/general.css';
+@import './platform/ios/iphone17.css';
+@import './platform/ios/ipad9thgen.css';
 
 body {
   font-family: 'Plus Jakarta Sans', sans-serif;

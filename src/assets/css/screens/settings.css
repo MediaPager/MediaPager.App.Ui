@@ -13,22 +13,6 @@
   min-height: 0;
 }
 
-.settings-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 20px;
-  border-bottom: 1px solid #1a2333;
-  background: #0e1525;
-}
-
-.settings-title {
-  color: #f1f5f9;
-  font-size: 1.25rem;
-  font-weight: 700;
-  margin-bottom: 18px;
-}
-
 .settings-body {
   display: flex;
   flex: 1;

@@ -53,6 +53,7 @@ const {
   playPreviousInQueue,
   playNextInQueue,
   restorePlayerAndEnterFullscreen,
+  enterMobileFullscreenWhenReady,
   stopPlayback,
 } = usePlayback()
 
@@ -96,8 +97,12 @@ watch(playerOpen, (open) => {
 
 watch(playerOpen, (open) => {
   if (open) {
+    if (isTouchDevice && !isMusic.value && playerMinimized.value)
+      movePlayerVideo(true)
     void initPlayer().then(() => {
-      nextTick(() => movePlayerVideo(playerMinimized.value))
+      nextTick(() => {
+        movePlayerVideo(playerMinimized.value)
+      })
     })
     if (showCastButton && !isTouchDevice && !canAirPlayPlayback.value) {
       void prepareGoogleCastSdk(window).catch(error => {
@@ -121,7 +126,7 @@ watch(playerMinimized, (minimized) => {
 
 function movePlayerVideo(minimized) {
   if (isMusic.value || playerPoppedOut.value) return
-  const videoPlayer = videoEl.value?.closest('.video-js')
+  const videoPlayer = videoEl.value?.closest('.video-js') ?? videoEl.value
   const target = minimized ? miniVideoTarget.value : playerStage.value
   if (!videoPlayer || !target || videoPlayer.parentElement === target) return
   target.appendChild(videoPlayer)
@@ -131,6 +136,10 @@ function movePlayerVideo(minimized) {
 function restoreMiniPlayer() {
   if (playerPoppedOut.value) {
     restorePlayerFromPopout()
+    return
+  }
+  if (isTouchDevice && !isMusic.value) {
+    enterMobileFullscreenWhenReady({ fromGesture: true })
     return
   }
   if (playerMinimized.value) togglePlayerMinimized()
@@ -567,9 +576,10 @@ function formatTime(seconds) {
       :class="{
         'player-shell--mini': playerMinimized,
         'player-shell--music': isMusic,
+        'player-shell--mobile-fullscreen': isTouchDevice && !playerMinimized && !isMusic,
       }"
     >
-      <div v-if="!playerMinimized" class="player-backdrop" />
+      <div v-if="!playerMinimized && !isTouchDevice" class="player-backdrop" />
       <q-card dark class="player-card column">
         <q-bar v-if="!playerMinimized" class="player-bar">
           <div class="player-title ellipsis text-weight-bold">
@@ -854,16 +864,20 @@ function formatTime(seconds) {
             >
               <template #error><div class="absolute-full flex flex-center bg-grey-10"><q-icon :name="isMusic ? 'music_note' : 'movie'" color="grey-6" /></div></template>
             </q-img>
-            <div v-else class="player-mini-video" :class="{ 'player-mini-video--popped-out': playerPoppedOut }">
+            <div
+              v-else
+              class="player-mini-video"
+              :class="{ 'player-mini-video--popped-out': playerPoppedOut }"
+            >
               <div ref="miniVideoTarget" class="player-mini-video-screen" />
               <button
                 class="player-mini-video-restore"
                 type="button"
-                :aria-label="playerPoppedOut ? 'Return player to MediaPager' : 'Restore player'"
-                :title="playerPoppedOut ? 'Return player to MediaPager' : 'Restore player'"
-                @click="restoreMiniPlayer"
+                :aria-label="playerPoppedOut ? 'Return player to MediaPager' : (isTouchDevice ? 'Resume full screen playback' : 'Restore player')"
+                :title="playerPoppedOut ? 'Return player to MediaPager' : (isTouchDevice ? 'Resume full screen playback' : 'Restore player')"
+                @click.stop.prevent="restoreMiniPlayer"
               >
-                <q-icon :name="playerPoppedOut ? 'open_in_new' : 'open_in_full'" />
+                <q-icon v-if="!isTouchDevice" :name="playerPoppedOut ? 'open_in_new' : 'open_in_full'" />
                 <span v-if="playerPoppedOut">Return to app</span>
               </button>
             </div>
@@ -873,12 +887,12 @@ function formatTime(seconds) {
             </div>
           </div>
           <div class="player-mini-transport">
-            <q-btn flat round dense icon="skip_previous" aria-label="Previous item" title="Previous item" :disable="!hasPrevious || isCasting" @click="playPreviousInQueue" />
-            <q-btn unelevated round color="primary" text-color="dark" :icon="playerPaused ? 'play_arrow' : 'pause'" :aria-label="playerPaused ? 'Play' : 'Pause'" @click="togglePlayerPlayback" />
-            <q-btn flat round dense icon="skip_next" aria-label="Next item" title="Next item" :disable="!hasNext || isCasting" @click="playNextInQueue" />
-            <q-btn flat round dense color="negative" icon="stop" aria-label="Stop playback" title="Stop playback" @click="stopPlayerPlayback" />
+            <q-btn v-if="!isTouchDevice" flat round dense icon="skip_previous" aria-label="Previous item" title="Previous item" :disable="!hasPrevious || isCasting" @click="playPreviousInQueue" />
+            <q-btn v-if="!isTouchDevice" unelevated round color="primary" text-color="dark" :icon="playerPaused ? 'play_arrow' : 'pause'" :aria-label="playerPaused ? 'Play' : 'Pause'" @click="togglePlayerPlayback" />
+            <q-btn v-if="!isTouchDevice" flat round dense icon="skip_next" aria-label="Next item" title="Next item" :disable="!hasNext || isCasting" @click="playNextInQueue" />
+            <q-btn flat round dense color="negative" :icon="isTouchDevice ? 'close' : 'stop'" :aria-label="isTouchDevice ? 'Close player' : 'Stop playback'" :title="isTouchDevice ? 'Close player' : 'Stop playback'" @click="stopPlayerPlayback" />
           </div>
-          <div class="player-mini-end-controls">
+          <div v-if="!isTouchDevice" class="player-mini-end-controls">
             <div class="player-mini-volume-control" @keydown.esc="miniVolumeOpen = false">
               <div v-if="miniVolumeOpen" class="player-mini-volume-popover column items-center q-pa-sm">
                 <div class="player-mini-volume-value">{{ Math.round(playbackVolume * 100) }}%</div>

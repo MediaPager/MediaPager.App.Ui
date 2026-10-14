@@ -1,0 +1,5 @@
+/*
+ * iPhone 17-specific overrides go here when a measured device-only issue is
+ * found. The general iOS file handles Dynamic Island and safe-area insets;
+ * keep this file scoped to verified iPhone 17 viewport/capability differences.
+ */

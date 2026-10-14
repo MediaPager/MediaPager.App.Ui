@@ -42,6 +42,47 @@ const homeTab = computed({
 })
 
 const mobileNavOpen = defineModel('mobileNavOpen', { type: Boolean, required: true })
+let pullRefreshStartY = null
+const pullRefreshDistance = ref(0)
+const pullRefreshThreshold = 150
+const pullRefreshOffset = computed(() => Math.min(58, pullRefreshDistance.value * 0.48))
+
+function onHomeTouchStart(event) {
+  if (typeof window.MediaPagerApp?.postMessage !== 'function' || homeTab.value !== 'stream') return
+  if (!['movies', 'tv'].includes(activeMediaKind.value)) return
+  if (!event.target?.closest?.('.movie-grid') || event.currentTarget.scrollTop > 0) return
+  pullRefreshStartY = event.touches?.[0]?.clientY ?? null
+  pullRefreshDistance.value = 0
+}
+
+function onHomeTouchMove(event) {
+  if (pullRefreshStartY == null) return
+  if (event.currentTarget.scrollTop > 0) {
+    pullRefreshDistance.value = 0
+    return
+  }
+  const currentY = event.touches?.[0]?.clientY
+  if (currentY == null) return
+  const pullDistance = currentY - pullRefreshStartY
+  if (pullDistance <= 0) {
+    pullRefreshDistance.value = 0
+    return
+  }
+  if (pullDistance > 8) event.preventDefault()
+  pullRefreshDistance.value = pullDistance
+}
+
+function onHomeTouchEnd() {
+  const refresh = pullRefreshDistance.value >= pullRefreshThreshold
+  pullRefreshStartY = null
+  pullRefreshDistance.value = 0
+  if (refresh) window.MediaPagerApp?.postMessage('refresh')
+}
+
+function onHomeTouchCancel() {
+  pullRefreshStartY = null
+  pullRefreshDistance.value = 0
+}
 
 const {
   movies,
@@ -643,7 +684,7 @@ function onDragEnd() {
             v-for="entry in pluginMainNav"
             :key="entry.key"
             clickable
-            @click="router.push({ name: 'plugin', params: { pluginId: entry.pluginId, pathMatch: entry.path.split('/').filter(Boolean) } })"
+            @click="closeMobileNav(); router.push({ name: 'plugin', params: { pluginId: entry.pluginId, pathMatch: entry.path.split('/').filter(Boolean) } })"
           >
             <q-item-section avatar><q-icon :name="entry.icon || 'extension'" /></q-item-section>
             <q-item-section>{{ entry.label }}</q-item-section>
@@ -704,9 +745,23 @@ function onDragEnd() {
         :class="{
           'home-panel--with-tabs': homeTab === 'stream',
           'home-panel--catalog': homeTab.startsWith('catalog:'),
+          'home-panel--pulling': pullRefreshDistance > 0,
         }"
+        :style="{ '--pull-refresh-offset': `${pullRefreshOffset}px` }"
         @scroll.passive="onCatalogPanelScroll"
+        @touchstart.passive="onHomeTouchStart"
+        @touchmove="onHomeTouchMove"
+        @touchend.passive="onHomeTouchEnd"
+        @touchcancel.passive="onHomeTouchCancel"
       >
+        <div
+          v-if="pullRefreshDistance > 0"
+          class="home-pull-refresh-indicator"
+          :class="{ 'home-pull-refresh-indicator--ready': pullRefreshDistance >= pullRefreshThreshold }"
+        >
+          <q-icon :name="pullRefreshDistance >= pullRefreshThreshold ? 'refresh' : 'south'" size="18px" />
+          <span>{{ pullRefreshDistance >= pullRefreshThreshold ? 'Release to refresh' : 'Pull to refresh' }}</span>
+        </div>
         <NoCatalogsScreen v-if="noCatalogsScreen" />
         <NotFoundPage v-else-if="streamTabNotFound || catalogNotFound" />
         <template v-else>

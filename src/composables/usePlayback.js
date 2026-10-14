@@ -7,6 +7,8 @@ import { api, apiOrigin } from './useApi'
 import { useMovies } from './useMovies'
 import { useSources } from './useSources'
 import { useCatalogItems } from './useCatalogItems'
+import { useTvShows } from './useTvShows'
+import { useMediaDetails } from './useMediaDetails'
 import { formatPluginError } from './pluginErrors'
 import { usePlaylist } from './usePlaylist'
 import { useUserSettings } from './useUserSettings'
@@ -38,6 +40,9 @@ let volumeGainElement = null
 let proxyUpgradePending = false
 let retryCurrentPlayback = null
 let playbackGeneration = 0
+let pendingNativeFullscreenVideo = null
+let pendingNativeFullscreenReady = null
+let pendingNativeFullscreenError = null
 
 // Set by the TV detail sheet while an episode plays: called when the video ends so
 // the next episode (if any) can start automatically when autoplay is enabled.
@@ -111,7 +116,9 @@ watch(subtitleStyle, (value) => {
 }, { deep: true })
 
 export function usePlayback() {
-  const { error, isTouchDevice } = useMovies()
+  const { error, isTouchDevice, movieSheetOpen } = useMovies()
+  const { tvSheetOpen } = useTvShows()
+  const { sourceDetailOpen } = useMediaDetails()
   const { loaded: sourcesLoaded, fetchSources, defaultSourceKey, defaultTvSourceKey } = useSources()
   const { localItemFor, findLocalItemByExternalId, findLocalItemById } = useCatalogItems()
   const { autoplay } = useUserSettings()
@@ -172,7 +179,20 @@ export function usePlayback() {
     }, MIN_PLAY_LOADING_MS)
   }
 
+  function cancelPlayLoading() {
+    if (playLoadingTimer) { clearTimeout(playLoadingTimer); playLoadingTimer = null }
+    playLoading.value = false
+  }
+
+  function dismissMobileDetailSheets(kind) {
+    if (!isTouchDevice || String(kind ?? 'movie').toLowerCase() === 'music') return
+    movieSheetOpen.value = false
+    tvSheetOpen.value = false
+    sourceDetailOpen.value = false
+  }
+
   async function onPlay(movie, { preserveQueue = false } = {}) {
+    dismissMobileDetailSheets(movie.kind)
     const generation = ++playbackGeneration
     beginPlayLoading()
     error.value = ''
@@ -202,8 +222,10 @@ export function usePlayback() {
           sourceKey: movie.sourceKey ?? null,
           localItem,
         })
-        playerMinimized.value = String(movie.kind ?? 'movie').toLowerCase() === 'music'
+        const movieKind = String(movie.kind ?? 'movie').toLowerCase()
+        playerMinimized.value = movieKind === 'music' || isTouchDevice
       }
+      if (isTouchDevice) playerMinimized.value = true
 
       if (localItem?.storagePath) {
         // Catalog item that lives on disk → play the local file directly.
@@ -241,7 +263,7 @@ export function usePlayback() {
         : { ...movie, directPlayback }
       subtitleQuery.value = currentMovie.value.title
       playerOpen.value = true
-      if (player) { await nextTick(); await applyPlaybackVolume(); loadCurrentSource() }
+      if (player) await loadResolvedSource()
       if (String(currentMovie.value.kind ?? '').toLowerCase() === 'music') {
         subtitles.value = []
         activeSub.value = null
@@ -260,6 +282,7 @@ export function usePlayback() {
   }
 
   async function onPlayEpisode(show, season, episode, ep, { preserveQueue = false } = {}) {
+    dismissMobileDetailSheets('tv')
     const generation = ++playbackGeneration
     beginPlayLoading()
     error.value = ''
@@ -283,8 +306,9 @@ export function usePlayback() {
           episode,
           episodeInfo: ep,
         })
-        playerMinimized.value = false
+        playerMinimized.value = isTouchDevice
       }
+      if (isTouchDevice) playerMinimized.value = true
       // TV episodes resolve through the stream provider — there's no per-episode
       // local catalog match, so no local-file path to try first.
       const resolved = await resolveProviderStream(show.id, {
@@ -310,7 +334,7 @@ export function usePlayback() {
         year: ep?.airDate ? String(ep.airDate).slice(0, 4) : (show.year ?? null),
       }
       playerOpen.value = true
-      if (player) { await nextTick(); await applyPlaybackVolume(); loadCurrentSource() }
+      if (player) await loadResolvedSource()
       loadSubtitles()
     } catch (e) {
       if (generation !== playbackGeneration) return
@@ -323,6 +347,7 @@ export function usePlayback() {
   }
 
   async function onPlaySourceItem(item, sourceKey, { preserveQueue = false } = {}) {
+    dismissMobileDetailSheets(item.kind)
     const generation = ++playbackGeneration
     beginPlayLoading()
     error.value = ''
@@ -361,8 +386,10 @@ export function usePlayback() {
           sourceKey,
           kind: item.kind ?? 'music',
         })
-        playerMinimized.value = String(item.kind ?? 'music').toLowerCase() === 'music'
+        const itemKind = String(item.kind ?? 'music').toLowerCase()
+        playerMinimized.value = itemKind === 'music' || isTouchDevice
       }
+      if (isTouchDevice) playerMinimized.value = true
 
       let directPlayback = false
       if (localItem?.storagePath) {
@@ -405,7 +432,7 @@ export function usePlayback() {
         subtitlePanelOpen.value = false
       }
       playerOpen.value = true
-      if (player) { await nextTick(); await applyPlaybackVolume(); loadCurrentSource() }
+      if (player) await loadResolvedSource()
       if (String(item.kind ?? '').toLowerCase() !== 'music') loadSubtitles()
     } catch (requestError) {
       if (generation !== playbackGeneration) return
@@ -454,7 +481,7 @@ export function usePlayback() {
     player.on('durationchange', updatePlaybackMetrics)
     nativeFullscreenVideo = videoEl.value
     nativeFullscreenVideo?.addEventListener('webkitbeginfullscreen', syncNativePlaybackState)
-    nativeFullscreenVideo?.addEventListener('webkitendfullscreen', syncNativePlaybackState)
+    nativeFullscreenVideo?.addEventListener('webkitendfullscreen', handleNativeFullscreenEnd)
     nativeFullscreenVideo?.addEventListener('seeked', syncNativePlaybackState)
     nativeFullscreenVideo?.addEventListener('timeupdate', syncNativePlaybackState)
     nativeFullscreenVideo?.addEventListener('play', syncNativePlaybackState)
@@ -466,11 +493,9 @@ export function usePlayback() {
     player.ready(() => {
       player.muted(playbackMuted.value)
       player.playbackRate(playbackRate.value)
-      void applyPlaybackVolume().finally(() => {
-        if (!player) return
-        loadCurrentSource()
-        if (isTouchDevice && !streamType.value.startsWith('audio/')) player.requestFullscreen?.()
-      })
+      void applyPlaybackVolume()
+      loadCurrentSource()
+      enterMobileFullscreenWhenReady()
     })
   }
 
@@ -492,6 +517,18 @@ export function usePlayback() {
     if (!player) return
     playerPaused.value = player.paused()
     updatePlaybackMetrics()
+  }
+
+  function handleNativeFullscreenEnd() {
+    syncNativePlaybackState()
+    if (!isTouchDevice || !playerOpen.value || isMusicPlayback()) return
+    player?.pause()
+    playerPaused.value = true
+    if (!playerMinimized.value) togglePlayerMinimized()
+  }
+
+  function isMusicPlayback() {
+    return String(currentMovie.value?.kind ?? '').toLowerCase() === 'music'
   }
 
   function togglePlayback() {
@@ -601,23 +638,62 @@ export function usePlayback() {
     playbackRate.value = rate
   }
 
-  async function toggleFullscreen() {
+  async function toggleFullscreen({ forceEnter = false } = {}) {
     if (!player) return
     const video = videoEl.value
-    if (video?.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
-      video.webkitExitFullscreen()
-      return
-    }
-    if (typeof video?.webkitEnterFullscreen === 'function') {
-      video.webkitEnterFullscreen()
-      return
-    }
     try {
-      if (player.isFullscreen()) await player.exitFullscreen()
+      if (!forceEnter && video?.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
+        video.webkitExitFullscreen()
+        return
+      }
+      if (typeof video?.webkitEnterFullscreen === 'function') {
+        video.webkitEnterFullscreen()
+        return
+      }
+      if (!forceEnter && player.isFullscreen()) await player.exitFullscreen()
       else await player.requestFullscreen()
     } catch {
       // Some platforms block fullscreen outside a direct user gesture.
     }
+  }
+
+  function clearPendingNativeFullscreen() {
+    if (!pendingNativeFullscreenVideo) return
+    pendingNativeFullscreenVideo.removeEventListener('canplay', pendingNativeFullscreenReady)
+    pendingNativeFullscreenVideo.removeEventListener('playing', pendingNativeFullscreenReady)
+    pendingNativeFullscreenVideo.removeEventListener('error', pendingNativeFullscreenError)
+    pendingNativeFullscreenVideo = null
+    pendingNativeFullscreenReady = null
+    pendingNativeFullscreenError = null
+  }
+
+  function enterMobileFullscreenWhenReady({ fromGesture = false } = {}) {
+    const video = videoEl.value
+    if (!isTouchDevice || !playerOpen.value || isMusicPlayback() || !video) return
+    clearPendingNativeFullscreen()
+    if (video.webkitDisplayingFullscreen && !fromGesture) return
+    if (fromGesture) {
+      if (player?.paused()) attemptPlay()
+      void toggleFullscreen({ forceEnter: true })
+    }
+    // HLS streams can report metadata before there is a frame to play. Asking
+    // for native fullscreen at that point works for local files but can be too
+    // early for remote streams (for example, stream provider).
+    if (video.readyState >= 2) {
+      if (!fromGesture) void toggleFullscreen({ forceEnter: true })
+      return
+    }
+
+    pendingNativeFullscreenVideo = video
+    pendingNativeFullscreenReady = () => {
+      clearPendingNativeFullscreen()
+      if (playerOpen.value && isTouchDevice && !isMusicPlayback() && !video.webkitDisplayingFullscreen)
+        void toggleFullscreen({ forceEnter: true })
+    }
+    pendingNativeFullscreenError = clearPendingNativeFullscreen
+    video.addEventListener('canplay', pendingNativeFullscreenReady)
+    video.addEventListener('playing', pendingNativeFullscreenReady)
+    video.addEventListener('error', pendingNativeFullscreenError)
   }
 
   function resizePlayer() {
@@ -630,6 +706,10 @@ export function usePlayback() {
   }
 
   async function restorePlayerAndEnterFullscreen() {
+    if (isTouchDevice && !isMusicPlayback()) {
+      enterMobileFullscreenWhenReady({ fromGesture: true })
+      return
+    }
     playerMinimized.value = false
     await nextTick()
     if (!player) return
@@ -761,9 +841,18 @@ export function usePlayback() {
   // an already-open player (autoplay — @show never re-fires in that case).
   function loadCurrentSource() {
     if (!player) return
+    clearPendingNativeFullscreen()
     clearAppliedSubtitleTracks()
     player.src({ src: streamUrl.value, type: streamType.value })
     attemptPlay()
+  }
+
+  async function loadResolvedSource() {
+    if (!player) return
+    await nextTick()
+    await applyPlaybackVolume()
+    loadCurrentSource()
+    enterMobileFullscreenWhenReady()
   }
 
   // ← / → seek and Space toggles play/pause whenever the player is open. Keys are
@@ -800,8 +889,9 @@ export function usePlayback() {
 
   function destroyPlayer() {
     window.removeEventListener('keydown', onPlayerKeydown)
+    clearPendingNativeFullscreen()
     nativeFullscreenVideo?.removeEventListener('webkitbeginfullscreen', syncNativePlaybackState)
-    nativeFullscreenVideo?.removeEventListener('webkitendfullscreen', syncNativePlaybackState)
+    nativeFullscreenVideo?.removeEventListener('webkitendfullscreen', handleNativeFullscreenEnd)
     nativeFullscreenVideo?.removeEventListener('seeked', syncNativePlaybackState)
     nativeFullscreenVideo?.removeEventListener('timeupdate', syncNativePlaybackState)
     nativeFullscreenVideo?.removeEventListener('play', syncNativePlaybackState)
@@ -946,6 +1036,8 @@ export function usePlayback() {
 
   return {
     playLoading,
+    beginPlayLoading,
+    cancelPlayLoading,
     playerOpen,
     playerMinimized,
     isTouchDevice,
@@ -1003,6 +1095,7 @@ export function usePlayback() {
     toggleMute,
     setPlaybackRate,
     toggleFullscreen,
+    enterMobileFullscreenWhenReady,
     togglePlayerMinimized,
     resizePlayer,
     restorePlayerAndEnterFullscreen,
