@@ -1,4 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
+import { readFileSync } from 'node:fs'
 
 import { quasar, transformAssetUrls } from '@quasar/vite-plugin'
 import vue from '@vitejs/plugin-vue'
@@ -39,6 +40,24 @@ function apiLocationPlugin(configuredApiBaseUrl) {
   }
 }
 
+function emailLogoPlugin() {
+  const logo = readFileSync(fileURLToPath(new URL('./src/assets/images/icon.png', import.meta.url)))
+  const fileName = 'mediapager-email-logo.png'
+
+  return {
+    name: 'mediapager-email-logo',
+    configureServer(server) {
+      server.middlewares.use(`/${fileName}`, (request, response, next) => {
+        if (request.method !== 'GET' && request.method !== 'HEAD') return next()
+        response.statusCode = 200
+        response.setHeader('Content-Type', 'image/png')
+        response.setHeader('Cache-Control', 'public, max-age=86400')
+        response.end(request.method === 'HEAD' ? undefined : logo)
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
@@ -56,10 +75,20 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       apiLocationPlugin(apiBaseUrl),
+      emailLogoPlugin(),
       vue({ template: { transformAssetUrls } }),
       quasar({
         sassVariables: fileURLToPath(new URL('./src/quasar-variables.sass', import.meta.url)),
       }),
     ],
+    build: {
+      rolldownOptions: {
+        output: {
+          assetFileNames: (asset) => asset.name === 'icon.png'
+            ? 'mediapager-email-logo.png'
+            : 'assets/[name]-[hash][extname]',
+        },
+      },
+    },
   }
 })

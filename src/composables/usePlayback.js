@@ -10,6 +10,8 @@ import { useCatalogItems } from './useCatalogItems'
 import { useTvShows } from './useTvShows'
 import { useMediaDetails } from './useMediaDetails'
 import { formatPluginError } from './pluginErrors'
+import { subtitleFileErrorMessage } from './subtitleErrors'
+import { waitForSubtitleTrackLoad } from './subtitleTrackReadiness'
 import { usePlaylist } from './usePlaylist'
 import { useUserSettings } from './useUserSettings'
 
@@ -40,9 +42,11 @@ let volumeGainElement = null
 let proxyUpgradePending = false
 let retryCurrentPlayback = null
 let playbackGeneration = 0
+let playerSourceReady = false
 let pendingNativeFullscreenVideo = null
 let pendingNativeFullscreenReady = null
 let pendingNativeFullscreenError = null
+let fullscreenOwnerDocument = null
 
 // Set by the TV detail sheet while an episode plays: called when the video ends so
 // the next episode (if any) can start automatically when autoplay is enabled.
@@ -51,6 +55,7 @@ const tvNextShowId = ref(null)
 
 const subtitles = ref([])
 const subsLoading = ref(false)
+const mobileSubtitleReady = ref(true)
 const subtitlePanelOpen = ref(false)
 const subtitleQuery = ref('')
 const subtitleTitleSearchActive = ref(false)
@@ -191,8 +196,19 @@ export function usePlayback() {
     sourceDetailOpen.value = false
   }
 
+  function beginPlaybackSubtitleLoad(kind) {
+    clearAppliedSubtitleTracks()
+    subtitles.value = []
+    activeSub.value = null
+    subtitleError.value = ''
+    subtitleTitleSearchActive.value = false
+    playerSourceReady = false
+    mobileSubtitleReady.value = !isTouchDevice || String(kind ?? 'movie').toLowerCase() === 'music'
+  }
+
   async function onPlay(movie, { preserveQueue = false } = {}) {
     dismissMobileDetailSheets(movie.kind)
+    beginPlaybackSubtitleLoad(movie.kind ?? 'movie')
     const generation = ++playbackGeneration
     beginPlayLoading()
     error.value = ''
@@ -283,6 +299,7 @@ export function usePlayback() {
 
   async function onPlayEpisode(show, season, episode, ep, { preserveQueue = false } = {}) {
     dismissMobileDetailSheets('tv')
+    beginPlaybackSubtitleLoad('tv')
     const generation = ++playbackGeneration
     beginPlayLoading()
     error.value = ''
@@ -348,6 +365,7 @@ export function usePlayback() {
 
   async function onPlaySourceItem(item, sourceKey, { preserveQueue = false } = {}) {
     dismissMobileDetailSheets(item.kind)
+    beginPlaybackSubtitleLoad(item.kind ?? 'music')
     const generation = ++playbackGeneration
     beginPlayLoading()
     error.value = ''
@@ -490,11 +508,11 @@ export function usePlayback() {
     window.addEventListener('keydown', onPlayerKeydown)
     // Autoplay: the click that opened the player counts as a user gesture, so try
     // with sound first and fall back to muted if the browser blocks it.
-    player.ready(() => {
+    player.ready(async () => {
       player.muted(playbackMuted.value)
       player.playbackRate(playbackRate.value)
       void applyPlaybackVolume()
-      loadCurrentSource()
+      await loadCurrentSource()
       enterMobileFullscreenWhenReady()
     })
   }
@@ -517,6 +535,15 @@ export function usePlayback() {
     if (!player) return
     playerPaused.value = player.paused()
     updatePlaybackMetrics()
+    const tracks = player.remoteTextTracks()
+    let isSubtitleShowing = false
+    for (let index = 0; index < tracks.length; index++) {
+      if (tracks[index].mode === 'showing') {
+        isSubtitleShowing = true
+        break
+      }
+    }
+    subtitlesVisible.value = isSubtitleShowing
   }
 
   function handleNativeFullscreenEnd() {
@@ -638,20 +665,79 @@ export function usePlayback() {
     playbackRate.value = rate
   }
 
+  function fullscreenTarget(video) {
+    return video?.closest('.player-popout-shell') ??
+      video?.closest('.player-card') ??
+      video?.closest('.player-stage') ??
+      player?.el?.() ??
+      null
+  }
+
+  function fullscreenElement(targetDocument) {
+    return targetDocument.fullscreenElement ??
+      targetDocument.webkitFullscreenElement ??
+      targetDocument.webkitCurrentFullScreenElement ??
+      null
+  }
+
+  function syncFullscreenSize() {
+    player?.trigger('resize')
+  }
+
+  function removeFullscreenListeners() {
+    if (!fullscreenOwnerDocument) return
+    fullscreenOwnerDocument.removeEventListener('fullscreenchange', syncFullscreenSize)
+    fullscreenOwnerDocument.removeEventListener('webkitfullscreenchange', syncFullscreenSize)
+    fullscreenOwnerDocument = null
+  }
+
+  function attachFullscreenListeners(targetDocument) {
+    if (fullscreenOwnerDocument === targetDocument) return
+    removeFullscreenListeners()
+    targetDocument.addEventListener('fullscreenchange', syncFullscreenSize)
+    targetDocument.addEventListener('webkitfullscreenchange', syncFullscreenSize)
+    fullscreenOwnerDocument = targetDocument
+  }
+
   async function toggleFullscreen({ forceEnter = false } = {}) {
     if (!player) return
     const video = videoEl.value
-    try {
-      if (!forceEnter && video?.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
+
+    // Native video fullscreen is available only on a subset of mobile browsers. It can
+    // display the selected text track, but it cannot contain the app's Vue controls.
+    if (isTouchDevice && typeof video?.webkitEnterFullscreen === 'function') {
+      if (!forceEnter && video.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
         video.webkitExitFullscreen()
         return
       }
-      if (typeof video?.webkitEnterFullscreen === 'function') {
-        video.webkitEnterFullscreen()
+      if (!video.webkitDisplayingFullscreen) video.webkitEnterFullscreen()
+      return
+    }
+
+    const target = fullscreenTarget(video)
+    if (!target) return
+    const targetDocument = target.ownerDocument ?? document
+    const activeElement = fullscreenElement(targetDocument)
+    const exitFullscreen = targetDocument.exitFullscreen ??
+      targetDocument.webkitExitFullscreen ??
+      targetDocument.webkitCancelFullScreen
+
+    try {
+      attachFullscreenListeners(targetDocument)
+      if (!forceEnter && activeElement === target) {
+        if (typeof exitFullscreen === 'function') await exitFullscreen.call(targetDocument)
         return
       }
-      if (!forceEnter && player.isFullscreen()) await player.exitFullscreen()
-      else await player.requestFullscreen()
+      if (forceEnter && activeElement === target) return
+
+      const requestFullscreen = target.requestFullscreen ??
+        target.webkitRequestFullscreen ??
+        target.webkitRequestFullScreen
+      if (typeof requestFullscreen !== 'function') {
+        Notify.create({ type: 'warning', message: 'Fullscreen mode is unavailable in this browser.' })
+        return
+      }
+      await requestFullscreen.call(target)
     } catch {
       // Some platforms block fullscreen outside a direct user gesture.
     }
@@ -670,6 +756,7 @@ export function usePlayback() {
   function enterMobileFullscreenWhenReady({ fromGesture = false } = {}) {
     const video = videoEl.value
     if (!isTouchDevice || !playerOpen.value || isMusicPlayback() || !video) return
+    if (!fromGesture && (!playerSourceReady || !mobileSubtitleReady.value)) return
     clearPendingNativeFullscreen()
     if (video.webkitDisplayingFullscreen && !fromGesture) return
     if (fromGesture) {
@@ -678,7 +765,7 @@ export function usePlayback() {
     }
     // HLS streams can report metadata before there is a frame to play. Asking
     // for native fullscreen at that point works for local files but can be too
-    // early for remote streams (for example, stream provider).
+    // early for remote streams.
     if (video.readyState >= 2) {
       if (!fromGesture) void toggleFullscreen({ forceEnter: true })
       return
@@ -745,6 +832,7 @@ export function usePlayback() {
     subtitleError.value = ''
     subsLoading.value = false
     subtitleTitleSearchActive.value = false
+    mobileSubtitleReady.value = true
     clearAppliedSubtitleTracks()
     setTvNextHandler(null)
     playlist.clearQueue()
@@ -818,12 +906,32 @@ export function usePlayback() {
   // Seconds skipped per ArrowLeft / ArrowRight press.
   const SEEK_STEP = 10
 
-  function clearAppliedSubtitleTracks() {
+  function removeSubtitleTrackElements() {
     if (!player) return
     const tracks = player.remoteTextTracks()
     for (let i = tracks.length - 1; i >= 0; i--) player.removeRemoteTextTrack(tracks[i])
+  }
+
+  function clearAppliedSubtitleTracks() {
+    removeSubtitleTrackElements()
     if (subtitleObjectUrl) URL.revokeObjectURL(subtitleObjectUrl)
     subtitleObjectUrl = null
+  }
+
+  function attachSubtitleTrack(subtitle) {
+    if (!player || !subtitleObjectUrl) return null
+    const track = player.addRemoteTextTrack(
+      {
+        kind: 'subtitles',
+        src: subtitleObjectUrl,
+        srclang: subtitle.language ?? 'en',
+        label: [subtitle.release ?? subtitle.fileName, subtitle.providerName].filter(Boolean).join(' · ') || 'subtitle',
+        default: subtitlesVisible.value,
+      },
+      true,
+    )
+    if (track?.track) track.track.mode = subtitlesVisible.value ? 'showing' : 'hidden'
+    return track
   }
 
   function attemptPlay() {
@@ -839,19 +947,27 @@ export function usePlayback() {
   // Load whatever streamUrl/streamType currently hold into the live player. Called
   // both on first open (from initPlayer's ready) and when a next episode takes over
   // an already-open player (autoplay — @show never re-fires in that case).
-  function loadCurrentSource() {
+  async function loadCurrentSource() {
     if (!player) return
+    playerSourceReady = false
     clearPendingNativeFullscreen()
-    clearAppliedSubtitleTracks()
+    removeSubtitleTrackElements()
     player.src({ src: streamUrl.value, type: streamType.value })
+    const selectedSubtitle = subtitles.value.find(subtitle => subtitle.fileId === activeSub.value)
+    const trackElement = selectedSubtitle ? attachSubtitleTrack(selectedSubtitle) : null
     attemptPlay()
+    if (selectedSubtitle && isTouchDevice && !isMusicPlayback()) {
+      await waitForSubtitleTrackLoad(trackElement)
+      if (activeSub.value === selectedSubtitle.fileId) mobileSubtitleReady.value = true
+    }
+    playerSourceReady = true
   }
 
   async function loadResolvedSource() {
     if (!player) return
     await nextTick()
     await applyPlaybackVolume()
-    loadCurrentSource()
+    await loadCurrentSource()
     enterMobileFullscreenWhenReady()
   }
 
@@ -890,6 +1006,7 @@ export function usePlayback() {
   function destroyPlayer() {
     window.removeEventListener('keydown', onPlayerKeydown)
     clearPendingNativeFullscreen()
+    removeFullscreenListeners()
     nativeFullscreenVideo?.removeEventListener('webkitbeginfullscreen', syncNativePlaybackState)
     nativeFullscreenVideo?.removeEventListener('webkitendfullscreen', handleNativeFullscreenEnd)
     nativeFullscreenVideo?.removeEventListener('seeked', syncNativePlaybackState)
@@ -903,6 +1020,7 @@ export function usePlayback() {
     disposeVolumeAmplifier()
     player?.dispose()
     player = null
+    playerSourceReady = false
     retryCurrentPlayback = null
     playerMinimized.value = false
     playerPaused.value = true
@@ -915,8 +1033,11 @@ export function usePlayback() {
 
   async function loadSubtitles() {
     if (!currentMovie.value) return
+    const autoSelectForMobile = isTouchDevice && !isMusicPlayback()
+    if (autoSelectForMobile) mobileSubtitleReady.value = false
     subtitleTitleSearchActive.value = false
     subsLoading.value = true
+    clearAppliedSubtitleTracks()
     subtitles.value = []
     activeSub.value = null
     subtitleError.value = ''
@@ -929,11 +1050,19 @@ export function usePlayback() {
       }
       const { data } = await api.get('/subtitles', { params })
       subtitles.value = data
+      // iOS native fullscreen cannot show the app's search panel. Attach the best
+      // ordered result first so the native CC menu can use it as soon as playback enters fullscreen.
+      if (autoSelectForMobile && subtitles.value.length > 0)
+        await selectSubtitle(subtitles.value[0], { show: false })
     } catch (e) {
       subtitles.value = []
       subtitleError.value = e.response?.data?.detail ?? e.response?.data?.error ?? e.message
     } finally {
       subsLoading.value = false
+      if (autoSelectForMobile) {
+        mobileSubtitleReady.value = !activeSub.value || playerSourceReady
+        if (mobileSubtitleReady.value && playerOpen.value) enterMobileFullscreenWhenReady()
+      }
     }
   }
 
@@ -967,8 +1096,8 @@ export function usePlayback() {
     return subtitleTitleSearchActive.value ? searchSubtitles() : loadSubtitles()
   }
 
-  function toggleSubtitles() {
-    subtitlesVisible.value = !subtitlesVisible.value
+  function toggleSubtitles(visible = !subtitlesVisible.value) {
+    subtitlesVisible.value = Boolean(visible)
     if (!player) return
     const tracks = player.remoteTextTracks()
     for (let i = 0; i < tracks.length; i++) {
@@ -979,40 +1108,28 @@ export function usePlayback() {
   function clearSubtitle() {
     activeSub.value = null
     subtitlesVisible.value = true
-    if (!player) return
-    const tracks = player.remoteTextTracks()
-    for (let i = tracks.length - 1; i >= 0; i--) player.removeRemoteTextTrack(tracks[i])
-    if (subtitleObjectUrl) URL.revokeObjectURL(subtitleObjectUrl)
-    subtitleObjectUrl = null
+    clearAppliedSubtitleTracks()
   }
 
-  async function selectSubtitle(sub) {
+  async function selectSubtitle(sub, { show = true } = {}) {
     activeSub.value = sub.fileId
+    subtitlesVisible.value = show
     subtitleError.value = ''
-    if (!player) return
-    const tracks = player.remoteTextTracks()
-    for (let i = tracks.length - 1; i >= 0; i--) player.removeRemoteTextTrack(tracks[i])
-    if (subtitleObjectUrl) URL.revokeObjectURL(subtitleObjectUrl)
+    clearAppliedSubtitleTracks()
     try {
       const { data } = await api.get('/subtitles/file', {
         params: { id: sub.fileId },
         responseType: 'blob',
       })
+      if (activeSub.value !== sub.fileId) return
       subtitleObjectUrl = URL.createObjectURL(data)
-      const track = player.addRemoteTextTrack(
-        {
-          kind: 'subtitles',
-          src: subtitleObjectUrl,
-          srclang: sub.language ?? 'en',
-          label: sub.release ?? sub.fileName ?? 'subtitle',
-          default: true,
-        },
-        true,
-      )
-      if (track?.track) track.track.mode = subtitlesVisible.value ? 'showing' : 'disabled'
+      const trackElement = attachSubtitleTrack(sub)
+      if (isTouchDevice && !isMusicPlayback()) await waitForSubtitleTrackLoad(trackElement)
     } catch (e) {
+      if (activeSub.value !== sub.fileId) return
       activeSub.value = null
-      subtitleError.value = e.response?.data?.detail ?? e.response?.data?.error ?? 'Could not fetch this subtitle.'
+      subtitlesVisible.value = false
+      subtitleError.value = await subtitleFileErrorMessage(e)
     }
   }
 

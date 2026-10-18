@@ -90,6 +90,97 @@ let castSession = null
 let castRemotePlayer = null
 let castRemoteController = null
 let castStopRequested = false
+const FULLSCREEN_CONTROLS_IDLE_MS = 2800
+const fullscreenControlsVisible = ref(true)
+let fullscreenDocument = null
+let fullscreenHost = null
+let fullscreenControlsTimer = null
+
+function clearFullscreenControlsTimer() {
+  if (!fullscreenControlsTimer) return
+  clearTimeout(fullscreenControlsTimer)
+  fullscreenControlsTimer = null
+}
+
+function setFullscreenControlsVisible(visible) {
+  fullscreenControlsVisible.value = visible
+  fullscreenHost?.classList.toggle('player-fullscreen-controls-hidden', !visible)
+}
+
+function scheduleFullscreenControlsHide() {
+  clearFullscreenControlsTimer()
+  if (!fullscreenHost || subtitlePanelOpen.value) return
+  fullscreenControlsTimer = window.setTimeout(() => {
+    fullscreenControlsTimer = null
+    if (!fullscreenHost || subtitlePanelOpen.value) return
+    setFullscreenControlsVisible(false)
+  }, FULLSCREEN_CONTROLS_IDLE_MS)
+}
+
+function revealFullscreenControls() {
+  if (!fullscreenHost) return
+  setFullscreenControlsVisible(true)
+  scheduleFullscreenControlsHide()
+}
+
+function onFullscreenActivity() {
+  revealFullscreenControls()
+}
+
+function syncFullscreenControls() {
+  const active = fullscreenDocument?.fullscreenElement ??
+    fullscreenDocument?.webkitFullscreenElement ??
+    fullscreenDocument?.webkitCurrentFullScreenElement ??
+    null
+  const host = active?.matches?.('.player-card, .player-popout-shell') ? active : null
+  if (fullscreenHost !== host) {
+    fullscreenHost?.classList.remove('player-fullscreen-controls-hidden')
+    fullscreenHost = host
+  }
+  if (!fullscreenHost) {
+    clearFullscreenControlsTimer()
+    setFullscreenControlsVisible(true)
+    return
+  }
+  setFullscreenControlsVisible(true)
+  scheduleFullscreenControlsHide()
+}
+
+function unbindFullscreenDocument() {
+  if (!fullscreenDocument) return
+  fullscreenDocument.removeEventListener('fullscreenchange', syncFullscreenControls)
+  fullscreenDocument.removeEventListener('webkitfullscreenchange', syncFullscreenControls)
+  fullscreenDocument.removeEventListener('pointermove', onFullscreenActivity)
+  fullscreenDocument.removeEventListener('pointerdown', onFullscreenActivity)
+  fullscreenDocument.removeEventListener('mousemove', onFullscreenActivity)
+  fullscreenDocument.removeEventListener('touchstart', onFullscreenActivity)
+  fullscreenDocument.removeEventListener('keydown', onFullscreenActivity)
+  fullscreenDocument = null
+}
+
+function bindFullscreenDocument(targetDocument) {
+  if (fullscreenDocument === targetDocument) return
+  unbindFullscreenDocument()
+  fullscreenDocument = targetDocument
+  targetDocument.addEventListener('fullscreenchange', syncFullscreenControls)
+  targetDocument.addEventListener('webkitfullscreenchange', syncFullscreenControls)
+  targetDocument.addEventListener('pointermove', onFullscreenActivity, { passive: true })
+  targetDocument.addEventListener('pointerdown', onFullscreenActivity, { passive: true })
+  targetDocument.addEventListener('mousemove', onFullscreenActivity, { passive: true })
+  targetDocument.addEventListener('touchstart', onFullscreenActivity, { passive: true })
+  targetDocument.addEventListener('keydown', onFullscreenActivity)
+  syncFullscreenControls()
+}
+
+watch(subtitlePanelOpen, (open) => {
+  if (!fullscreenHost) return
+  if (open) {
+    clearFullscreenControlsTimer()
+    setFullscreenControlsVisible(true)
+  } else {
+    scheduleFullscreenControlsHide()
+  }
+})
 
 watch(playerOpen, (open) => {
   if (!open) closePlayerPopout()
@@ -224,6 +315,7 @@ async function popOutPlayer() {
     closePlayerPopoutWindow(popup)
     return
   }
+  bindFullscreenDocument(popup.document)
   togglePlayerMinimized()
   nextTick(resizePlayer)
   popup.focus()
@@ -250,6 +342,7 @@ function restorePlayerFromPopout() {
   releasePopoutPointer()
   if (playerMinimized.value) togglePlayerMinimized()
   closePlayerPopoutWindow(popup)
+  bindFullscreenDocument(document)
   if (showCastButton && !isTouchDevice && !canAirPlayPlayback.value)
     void prepareGoogleCastSdk(window).catch(error => console.warn('Google Cast SDK failed to load.', error))
   nextTick(resizePlayer)
@@ -263,6 +356,7 @@ function handlePlayerPopoutClosed(popup) {
   }
   if (popup !== playerPopoutWindow) return
   resetCastSdkForWindow(popup)
+  bindFullscreenDocument(document)
   stopPlayerPlayback()
 }
 
@@ -292,6 +386,7 @@ function closePlayerPopout() {
     playerContent.value.appendChild(document.adoptNode(controls))
   releasePopoutPointer()
   closePlayerPopoutWindow(popup)
+  bindFullscreenDocument(document)
 }
 
 function prepareGoogleCastSdk(targetWindow) {
@@ -553,11 +648,18 @@ function minimizePlayerOnEscape(event) {
   togglePlayerMinimized()
 }
 
-onMounted(() => document.addEventListener('keydown', minimizePlayerOnEscape))
+onMounted(() => {
+  document.addEventListener('keydown', minimizePlayerOnEscape)
+  bindFullscreenDocument(document)
+})
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', minimizePlayerOnEscape)
+  clearFullscreenControlsTimer()
+  fullscreenHost?.classList.remove('player-fullscreen-controls-hidden')
+  fullscreenHost = null
   document.body.classList.remove('player-modal-open')
   closePlayerPopout()
+  unbindFullscreenDocument()
 })
 
 function formatTime(seconds) {
@@ -734,6 +836,7 @@ function formatTime(seconds) {
                           <q-item-label class="sub-release">{{ sub.release ?? sub.fileName }}</q-item-label>
                           <q-item-label caption class="text-grey-6">
                             {{ sub.popularity }} matches · {{ sub.language }}
+                            <span v-if="sub.providerName"> · {{ sub.providerName }}</span>
                             <span v-if="sub.hearingImpaired"> · SDH</span>
                           </q-item-label>
                         </q-item-section>

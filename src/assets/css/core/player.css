@@ -56,6 +56,102 @@ body.player-modal-open {
   overflow: hidden;
 }
 
+.player-card:fullscreen,
+.player-card:-webkit-full-screen,
+.player-popout-shell:fullscreen,
+.player-popout-shell:-webkit-full-screen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background: #080c16;
+}
+
+.player-card:fullscreen .player-content,
+.player-card:-webkit-full-screen .player-content {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+}
+
+.player-card:fullscreen .player-stage,
+.player-card:-webkit-full-screen .player-stage,
+.player-popout-shell:fullscreen .player-popout-screen,
+.player-popout-shell:-webkit-full-screen .player-popout-screen {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.player-card:fullscreen .player-bar,
+.player-card:-webkit-full-screen .player-bar {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  right: 0;
+  left: 0;
+  background: linear-gradient(to bottom, rgba(8, 12, 22, 0.92), transparent);
+  border-bottom: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.player-card:fullscreen .player-controls,
+.player-card:-webkit-full-screen .player-controls,
+.player-popout-shell:fullscreen .player-popout-controls,
+.player-popout-shell:-webkit-full-screen .player-popout-controls {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(to top, rgba(8, 12, 22, 0.96), transparent);
+  border-top: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.player-card:fullscreen .subtitle-toggle,
+.player-card:-webkit-full-screen .subtitle-toggle,
+.player-popout-shell:fullscreen .subtitle-toggle,
+.player-popout-shell:-webkit-full-screen .subtitle-toggle {
+  top: 48px;
+  right: 14px;
+  z-index: 30;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.player-card.player-fullscreen-controls-hidden:fullscreen .player-bar,
+.player-card.player-fullscreen-controls-hidden:-webkit-full-screen .player-bar {
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+}
+
+.player-card.player-fullscreen-controls-hidden:fullscreen .player-controls,
+.player-card.player-fullscreen-controls-hidden:-webkit-full-screen .player-controls,
+.player-popout-shell.player-fullscreen-controls-hidden:fullscreen .player-popout-controls,
+.player-popout-shell.player-fullscreen-controls-hidden:-webkit-full-screen .player-popout-controls {
+  opacity: 0;
+  transform: translateY(100%);
+  pointer-events: none;
+}
+
+.player-card.player-fullscreen-controls-hidden:fullscreen .subtitle-toggle,
+.player-card.player-fullscreen-controls-hidden:-webkit-full-screen .subtitle-toggle,
+.player-popout-shell.player-fullscreen-controls-hidden:fullscreen .subtitle-toggle,
+.player-popout-shell.player-fullscreen-controls-hidden:-webkit-full-screen .subtitle-toggle {
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+}
+
 .player-bar {
   background: #0e1525;
   border-bottom: 1px solid #1a2333;

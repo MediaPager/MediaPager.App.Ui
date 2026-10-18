@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { api } from './useApi'
+import { detectTouchDevice } from './deviceCapabilities'
 
 const movies = ref([])
 const page = ref(1)
@@ -23,7 +24,12 @@ const movieSheetOpen = ref(false)
 const sheetMovie = ref(null)
 const sheetDetails = ref(null)
 const sheetLoading = ref(false)
-const isTouchDevice = window.matchMedia('(hover: none)').matches
+const isTouchDevice = detectTouchDevice({
+  hoverNone: window.matchMedia('(hover: none)').matches,
+  platform: window.navigator.platform,
+  userAgent: window.navigator.userAgent,
+  maxTouchPoints: window.navigator.maxTouchPoints,
+})
 
 export function useMovies() {
   async function fetchMovies() {
