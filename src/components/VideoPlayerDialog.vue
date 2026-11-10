@@ -95,6 +95,14 @@ const fullscreenControlsVisible = ref(true)
 let fullscreenDocument = null
 let fullscreenHost = null
 let fullscreenControlsTimer = null
+let nativeWindowFullscreen = false
+let hostFullscreenReported = null
+
+function reportHostFullscreen(fullscreen) {
+  if (hostFullscreenReported === fullscreen) return
+  hostFullscreenReported = fullscreen
+  window.MediaPagerFullscreen?.postMessage(fullscreen ? 'true' : 'false')
+}
 
 function clearFullscreenControlsTimer() {
   if (!fullscreenControlsTimer) return
@@ -132,7 +140,12 @@ function syncFullscreenControls() {
     fullscreenDocument?.webkitFullscreenElement ??
     fullscreenDocument?.webkitCurrentFullScreenElement ??
     null
-  const host = active?.matches?.('.player-card, .player-popout-shell') ? active : null
+  const host = active?.matches?.('.player-card, .player-popout-shell')
+    ? active
+    : nativeWindowFullscreen
+      ? document.querySelector('.player-card')
+      : null
+  reportHostFullscreen(Boolean(host))
   if (fullscreenHost !== host) {
     fullscreenHost?.classList.remove('player-fullscreen-controls-hidden')
     fullscreenHost = host
@@ -144,6 +157,16 @@ function syncFullscreenControls() {
   }
   setFullscreenControlsVisible(true)
   scheduleFullscreenControlsHide()
+}
+
+function onNativeWindowFullscreenChanged(event) {
+  nativeWindowFullscreen = Boolean(event.detail?.fullscreen)
+  document.querySelector('.player-card')?.classList.toggle(
+    'player-native-fullscreen',
+    nativeWindowFullscreen,
+  )
+  syncFullscreenControls()
+  window.dispatchEvent(new Event('resize'))
 }
 
 function unbindFullscreenDocument() {
@@ -185,6 +208,22 @@ watch(subtitlePanelOpen, (open) => {
 watch(playerOpen, (open) => {
   if (!open) closePlayerPopout()
 }, { flush: 'sync' })
+
+watch([playerOpen, playerMinimized], ([open, minimized]) => {
+  if (nativeWindowFullscreen && (!open || minimized)) {
+    window.MediaPagerWindow?.postMessage('exitFullscreen')
+    return
+  }
+  if (open && !minimized) {
+    nextTick(() => {
+      document.querySelector('.player-card')?.classList.toggle(
+        'player-native-fullscreen',
+        nativeWindowFullscreen,
+      )
+      syncFullscreenControls()
+    })
+  }
+})
 
 watch(playerOpen, (open) => {
   if (open) {
@@ -643,6 +682,15 @@ function releasePopoutPointer() {
 
 function minimizePlayerOnEscape(event) {
   if (event.key !== 'Escape' || !playerOpen.value || playerMinimized.value) return
+  if (nativeWindowFullscreen) {
+    event.preventDefault()
+    event.stopPropagation()
+    window.MediaPagerWindow?.postMessage('exitFullscreen')
+    return
+  }
+  if (fullscreenDocument?.fullscreenElement ??
+      fullscreenDocument?.webkitFullscreenElement ??
+      fullscreenDocument?.webkitCurrentFullScreenElement) return
   event.preventDefault()
   event.stopPropagation()
   togglePlayerMinimized()
@@ -650,12 +698,18 @@ function minimizePlayerOnEscape(event) {
 
 onMounted(() => {
   document.addEventListener('keydown', minimizePlayerOnEscape)
+  window.addEventListener('mediapager:stop-playback', stopPlayerPlayback)
+  window.addEventListener('mediapager:window-fullscreen-changed', onNativeWindowFullscreenChanged)
   bindFullscreenDocument(document)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', minimizePlayerOnEscape)
+  window.removeEventListener('mediapager:stop-playback', stopPlayerPlayback)
+  window.removeEventListener('mediapager:window-fullscreen-changed', onNativeWindowFullscreenChanged)
+  reportHostFullscreen(false)
   clearFullscreenControlsTimer()
   fullscreenHost?.classList.remove('player-fullscreen-controls-hidden')
+  fullscreenHost?.classList.remove('player-native-fullscreen')
   fullscreenHost = null
   document.body.classList.remove('player-modal-open')
   closePlayerPopout()

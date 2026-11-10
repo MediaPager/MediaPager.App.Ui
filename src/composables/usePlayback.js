@@ -247,7 +247,7 @@ export function usePlayback() {
         // Catalog item that lives on disk → play the local file directly.
         const { data } = await api.post(`/catalog-items/${localItem.id}/local`)
         if (generation !== playbackGeneration) return
-        streamUrl.value = data.url
+        streamUrl.value = new URL(data.url, apiOrigin()).toString()
         streamType.value = data.mime ?? 'application/octet-stream'
         playingLocal.value = true
       } else {
@@ -413,7 +413,7 @@ export function usePlayback() {
       if (localItem?.storagePath) {
         const { data } = await api.post(`/catalog-items/${localItem.id}/local`)
         if (generation !== playbackGeneration) return
-        streamUrl.value = data.url
+        streamUrl.value = new URL(data.url, apiOrigin()).toString()
         streamType.value = data.mime ?? 'application/octet-stream'
         playingLocal.value = true
         directPlayback = true
@@ -481,8 +481,19 @@ export function usePlayback() {
       }
     })
     player.on('error', () => {
-      if (player?.error())
-        playbackError.value = 'Playback could not continue. The stream may have expired or become unavailable.'
+      const mediaError = player?.error()
+      if (!mediaError) return
+      if (playingLocal.value) {
+        if (mediaError.code === 2) {
+          playbackError.value = 'The local file could not be fetched from the server. Check the connection and that the file is still available.'
+        } else if (mediaError.code === 3 || mediaError.code === 4) {
+          playbackError.value = 'This browser could not play the local file format or its audio/video codec.'
+        } else {
+          playbackError.value = 'The local file could not be played. It may be unavailable or use an unsupported format.'
+        }
+        return
+      }
+      playbackError.value = 'Playback could not continue. The stream may have expired or become unavailable.'
     })
     player.on('play', () => { playerPaused.value = false })
     player.on('pause', () => { playerPaused.value = true })
@@ -716,6 +727,11 @@ export function usePlayback() {
 
     const target = fullscreenTarget(video)
     if (!target) return
+    if (target.classList.contains('player-native-fullscreen')) {
+      if (!forceEnter) window.MediaPagerApp?.postMessage('exitFullscreen')
+      return
+    }
+
     const targetDocument = target.ownerDocument ?? document
     const activeElement = fullscreenElement(targetDocument)
     const exitFullscreen = targetDocument.exitFullscreen ??
@@ -734,6 +750,11 @@ export function usePlayback() {
         target.webkitRequestFullscreen ??
         target.webkitRequestFullScreen
       if (typeof requestFullscreen !== 'function') {
+        if (targetDocument === document &&
+            typeof window.MediaPagerWindow?.postMessage === 'function') {
+          window.MediaPagerWindow.postMessage('fullscreen')
+          return
+        }
         Notify.create({ type: 'warning', message: 'Fullscreen mode is unavailable in this browser.' })
         return
       }

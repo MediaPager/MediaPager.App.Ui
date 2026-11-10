@@ -433,6 +433,7 @@ function openProfile() {
 }
 
 function backToServerList() {
+  window.dispatchEvent(new Event('mediapager:stop-playback'))
   window.MediaPagerApp?.postMessage('backToServers')
 }
 

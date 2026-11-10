@@ -58,6 +58,7 @@ body.player-modal-open {
 
 .player-card:fullscreen,
 .player-card:-webkit-full-screen,
+.player-card.player-native-fullscreen,
 .player-popout-shell:fullscreen,
 .player-popout-shell:-webkit-full-screen {
   position: fixed;
@@ -74,7 +75,8 @@ body.player-modal-open {
 }
 
 .player-card:fullscreen .player-content,
-.player-card:-webkit-full-screen .player-content {
+.player-card:-webkit-full-screen .player-content,
+.player-card.player-native-fullscreen .player-content {
   position: absolute;
   inset: 0;
   display: block;
@@ -83,6 +85,7 @@ body.player-modal-open {
 
 .player-card:fullscreen .player-stage,
 .player-card:-webkit-full-screen .player-stage,
+.player-card.player-native-fullscreen .player-stage,
 .player-popout-shell:fullscreen .player-popout-screen,
 .player-popout-shell:-webkit-full-screen .player-popout-screen {
   position: absolute;
@@ -92,7 +95,8 @@ body.player-modal-open {
 }
 
 .player-card:fullscreen .player-bar,
-.player-card:-webkit-full-screen .player-bar {
+.player-card:-webkit-full-screen .player-bar,
+.player-card.player-native-fullscreen .player-bar {
   position: absolute;
   z-index: 20;
   top: 0;
@@ -105,6 +109,7 @@ body.player-modal-open {
 
 .player-card:fullscreen .player-controls,
 .player-card:-webkit-full-screen .player-controls,
+.player-card.player-native-fullscreen .player-controls,
 .player-popout-shell:fullscreen .player-popout-controls,
 .player-popout-shell:-webkit-full-screen .player-popout-controls {
   position: absolute;
@@ -119,6 +124,7 @@ body.player-modal-open {
 
 .player-card:fullscreen .subtitle-toggle,
 .player-card:-webkit-full-screen .subtitle-toggle,
+.player-card.player-native-fullscreen .subtitle-toggle,
 .player-popout-shell:fullscreen .subtitle-toggle,
 .player-popout-shell:-webkit-full-screen .subtitle-toggle {
   top: 48px;
@@ -128,7 +134,8 @@ body.player-modal-open {
 }
 
 .player-card.player-fullscreen-controls-hidden:fullscreen .player-bar,
-.player-card.player-fullscreen-controls-hidden:-webkit-full-screen .player-bar {
+.player-card.player-fullscreen-controls-hidden:-webkit-full-screen .player-bar,
+.player-card.player-native-fullscreen.player-fullscreen-controls-hidden .player-bar {
   opacity: 0;
   transform: translateY(-100%);
   pointer-events: none;
@@ -136,6 +143,7 @@ body.player-modal-open {
 
 .player-card.player-fullscreen-controls-hidden:fullscreen .player-controls,
 .player-card.player-fullscreen-controls-hidden:-webkit-full-screen .player-controls,
+.player-card.player-native-fullscreen.player-fullscreen-controls-hidden .player-controls,
 .player-popout-shell.player-fullscreen-controls-hidden:fullscreen .player-popout-controls,
 .player-popout-shell.player-fullscreen-controls-hidden:-webkit-full-screen .player-popout-controls {
   opacity: 0;
@@ -145,6 +153,7 @@ body.player-modal-open {
 
 .player-card.player-fullscreen-controls-hidden:fullscreen .subtitle-toggle,
 .player-card.player-fullscreen-controls-hidden:-webkit-full-screen .subtitle-toggle,
+.player-card.player-native-fullscreen.player-fullscreen-controls-hidden .subtitle-toggle,
 .player-popout-shell.player-fullscreen-controls-hidden:fullscreen .subtitle-toggle,
 .player-popout-shell.player-fullscreen-controls-hidden:-webkit-full-screen .subtitle-toggle {
   opacity: 0;

@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Notify } from 'quasar'
-import { api } from '../composables/useApi'
+import { api, apiOrigin } from '../composables/useApi'
 import { useMovies } from '../composables/useMovies'
 import { useTvShows } from '../composables/useTvShows'
 import { builtinStreamTabs, useStreamTabs } from '../composables/useStreamTabs'
@@ -530,7 +530,7 @@ async function openCatalogDocument(item) {
   documentWindow.document.title = item.title ?? 'Document'
   try {
     const { data } = await api.post(`/catalog-items/${encodeURIComponent(item.id)}/local`)
-    documentWindow.location.replace(data.url)
+    documentWindow.location.replace(new URL(data.url, apiOrigin()).toString())
   } catch (requestError) {
     documentWindow.close()
     const message = requestError.response?.data?.detail ?? requestError.response?.data?.error ?? 'Could not open this document.'

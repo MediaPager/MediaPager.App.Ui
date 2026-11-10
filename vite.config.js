@@ -6,7 +6,7 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig, loadEnv } from 'vite'
 import { configuredApiBaseUrl } from './src/apiBaseUrl.js'
 
-function apiLocationPlugin(configuredApiBaseUrl) {
+function apiLocationPlugin(configuredApiBaseUrl, localApiBaseUrl) {
   function sendApiLocation(request, response, next) {
     if (request.method !== 'GET') return next()
     const requestHost = request.headers.host?.split(':')[0]?.toLowerCase()
@@ -14,9 +14,12 @@ function apiLocationPlugin(configuredApiBaseUrl) {
     const siteName = requestHost?.endsWith(frpSuffix)
       ? requestHost.slice(0, -frpSuffix.length)
       : null
+    const isLoopback = requestHost === 'localhost' || requestHost === '127.0.0.1'
     const apiBaseUrl = siteName
       ? `https://api-${siteName}${frpSuffix}`
-      : configuredApiBaseUrl
+      : isLoopback
+        ? localApiBaseUrl
+        : configuredApiBaseUrl
     response.statusCode = 200
     response.setHeader('Content-Type', 'application/json; charset=utf-8')
     response.setHeader('Cache-Control', 'no-store')
@@ -25,16 +28,25 @@ function apiLocationPlugin(configuredApiBaseUrl) {
 
   return {
     name: 'mediapager-api-location',
-    configureServer(server) {
+    configureServer: installApiLocationMiddleware,
+    configurePreviewServer: installApiLocationMiddleware,
+  }
+
+  function installApiLocationMiddleware(server) {
       server.middlewares.use('/info/apiurl', sendApiLocation)
       server.middlewares.use('/runtime-config.json', sendApiLocation)
-    },
+  }
+}
+
+function runtimeConfigPlugin(apiBaseUrl) {
+  return {
+    name: 'mediapager-runtime-config',
     generateBundle() {
-      const apiBaseUrl = configuredApiBaseUrl || '/'
+      const configured = apiBaseUrl || '/'
       this.emitFile({
         type: 'asset',
         fileName: 'runtime-config.json',
-        source: `${JSON.stringify({ apiBaseUrl }, null, 2)}\n`,
+        source: `${JSON.stringify({ apiBaseUrl: configured }, null, 2)}\n`,
       })
     },
   }
@@ -64,6 +76,9 @@ export default defineConfig(({ mode }) => {
   const apiBaseUrl = configuredApiBaseUrl(
     process.env.VITE_API_BASE_URL ?? env.VITE_API_BASE_URL,
   )
+  const localApiBaseUrl = configuredApiBaseUrl(
+    process.env.MEDIAPAGER_DEV_LOCAL_API_BASE_URL ?? process.env.VITE_API_BASE_URL ?? env.VITE_API_BASE_URL,
+  )
   const allowedHosts = String(process.env.VITE_ALLOWED_HOSTS ?? env.VITE_ALLOWED_HOSTS ?? '')
     .split(',')
     .map((host) => host.trim())
@@ -74,7 +89,8 @@ export default defineConfig(({ mode }) => {
       ...(allowedHosts.length ? { allowedHosts } : {}),
     },
     plugins: [
-      apiLocationPlugin(apiBaseUrl),
+      apiLocationPlugin(apiBaseUrl, localApiBaseUrl),
+      runtimeConfigPlugin(apiBaseUrl),
       emailLogoPlugin(),
       vue({ template: { transformAssetUrls } }),
       quasar({
