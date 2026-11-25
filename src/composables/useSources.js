@@ -74,19 +74,20 @@ export function useSources() {
       (plugin.capabilities ?? []).includes('stream') &&
       (plugin.streamMode ?? 'online') === 'online'))
 
-  // Movies and TV resolve through a provider that serves video where possible. A
-  // music-only provider may sort first, so don't accidentally route video into it.
+  // Custom-UI sources render their own browse surface and are not implicit catalog resolvers.
+  const resolverSources = computed(() => sources.value.filter((source) => source.customUi !== true))
   const defaultSourceKey = computed(() => {
     const kindOf = (source) => String(source.kind ?? '').toLowerCase()
-    return sources.value.find((source) => ['movie', 'movies'].includes(kindOf(source)))?.key
-      ?? sources.value.find((source) => ['tv', 'tvshow', 'tv-show'].includes(kindOf(source)))?.key
-      ?? sources.value.find((source) => !['music', 'podcast', 'audiobook', 'book'].includes(kindOf(source)))?.key
-      ?? sources.value[0]?.key
+    const candidates = resolverSources.value
+    return candidates.find((source) => ['movie', 'movies'].includes(kindOf(source)))?.key
+      ?? candidates.find((source) => ['tv', 'tvshow', 'tv-show'].includes(kindOf(source)))?.key
+      ?? candidates.find((source) => !['music', 'podcast', 'audiobook', 'book'].includes(kindOf(source)))?.key
+      ?? candidates[0]?.key
       ?? null
   })
   const defaultTvSourceKey = computed(() => {
     const tvKinds = ['tv', 'tvshow', 'tv-show', 'tv-shows']
-    return sources.value.find((source) => tvKinds.includes(String(source.kind ?? '').toLowerCase()))?.key
+    return resolverSources.value.find((source) => tvKinds.includes(String(source.kind ?? '').toLowerCase()))?.key
       ?? defaultSourceKey.value
   })
 
