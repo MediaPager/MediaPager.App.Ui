@@ -54,7 +54,15 @@ function onSignOut() {
 
 // Signing out on any screen drops back to the auth page; signing in returns to the home tab.
 watch(accessToken, (token) => {
-  if (!token) router.push('/')
+  if (!token) {
+    router.push('/')
+    return
+  }
+  // The initial navigation was cancelled by the auth guard before login, leaving the
+  // router at START_LOCATION. Start it now so <router-view> has a component to render.
+  if (!router.currentRoute.value.name || router.currentRoute.value.matched.length === 0) {
+    router.replace({ name: 'stream', params: { tab: 'movies' } })
+  }
 })
 
 onMounted(() => {

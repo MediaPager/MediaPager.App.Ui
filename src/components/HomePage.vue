@@ -1182,7 +1182,11 @@ function onDragEnd() {
                     <div v-if="!isTouchDevice" class="absolute-bottom-left q-ma-xs">
                       <item-rating-menu :item="item" size="sm" />
                     </div>
-                    <div v-if="selectedCatalog.catalogType.slug !== 'docs'" class="play-overlay absolute-full flex flex-center">
+                    <div v-if="!item.storagePath" class="processing-overlay absolute-full flex flex-center column">
+                      <q-spinner color="primary" size="2rem" />
+                      <div class="processing-label">Preparing media…</div>
+                    </div>
+                    <div v-else-if="selectedCatalog.catalogType.slug !== 'docs'" class="play-overlay absolute-full flex flex-center">
                       <q-btn
                         round
                         unelevated

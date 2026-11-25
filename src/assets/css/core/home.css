@@ -639,6 +639,19 @@
   color: #ffaa33;
 }
 
+.processing-overlay {
+  background: rgba(8, 12, 22, 0.82);
+  color: #e2e8f0;
+  gap: 8px;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+}
+
+.processing-label {
+  text-align: center;
+  padding: 0 10px;
+}
+
 .play-overlay {
   background: rgba(8, 12, 22, 0.78);
   opacity: 0;

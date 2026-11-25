@@ -28,6 +28,13 @@ const playableItem = computed(() => props.queueItem ?? {
   kind: props.kind,
   sourceKey: props.sourceKey,
 })
+const isPreparing = computed(() => {
+  if (props.sourceKey) return false
+  const candidate = props.queueItem?.localItem ?? props.item
+  return candidate != null &&
+    Object.prototype.hasOwnProperty.call(candidate, 'storagePath') &&
+    !candidate.storagePath
+})
 
 function play() {
   if (props.playHandler) return props.playHandler()
@@ -51,7 +58,17 @@ async function openPlaylistPicker() {
 
 <template>
   <div class="media-details-actions row items-center q-gutter-sm" :class="{ 'media-details-actions-compact': compact }">
-    <q-btn unelevated color="primary" text-color="dark" icon="play_arrow" :label="compact ? undefined : 'Play'" :aria-label="compact ? 'Play now' : undefined" @click="play" />
+    <q-btn
+      unelevated
+      color="primary"
+      text-color="dark"
+      icon="play_arrow"
+      :label="isPreparing ? (compact ? undefined : 'Preparing') : (compact ? undefined : 'Play')"
+      :aria-label="isPreparing ? 'Media is preparing' : (compact ? 'Play now' : undefined)"
+      :loading="isPreparing"
+      :disable="isPreparing"
+      @click="play"
+    />
     <q-btn outline color="primary" icon="playlist_add" :label="compact ? undefined : 'Add to queue'" :aria-label="compact ? 'Add to queue' : undefined" @click="queue" />
     <q-btn outline color="grey-5" icon="queue_music" :label="compact ? undefined : 'Add to playlist'" :aria-label="compact ? 'Add to playlist' : undefined" @click="openPlaylistPicker" />
     <PluginActionButtons
