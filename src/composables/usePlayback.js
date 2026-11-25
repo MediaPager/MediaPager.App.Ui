@@ -132,7 +132,12 @@ export function usePlayback() {
   // Resolve a title to a proxied media URL through the selected stream provider.
   // Which provider that is depends entirely on the source key supplied by the caller
   // or the first loaded source — the UI does not hard-code provider implementations.
-  async function resolveProviderStream(externalId, { season = null, episode = null, sourceKey: requestedSourceKey = null } = {}) {
+  async function resolveProviderStream(externalId, {
+    season = null,
+    episode = null,
+    sourceKey: requestedSourceKey = null,
+    streamVariantId = null,
+  } = {}) {
     if (!sourcesLoaded.value) await fetchSources()
     const sourceKey = requestedSourceKey ?? defaultSourceKey.value
     if (!sourceKey) {
@@ -140,6 +145,7 @@ export function usePlayback() {
     }
     const params = {}
     if (season != null) { params.season = season; params.episode = episode }
+    if (streamVariantId != null) params.streamVariantId = streamVariantId
     if (playbackVolume.value > 1 || volumeGainNode) params.forceProxy = true
     let data
     try {
@@ -418,7 +424,10 @@ export function usePlayback() {
         playingLocal.value = true
         directPlayback = true
       } else {
-        const resolved = await resolveProviderStream(externalId, { sourceKey })
+        const resolved = await resolveProviderStream(externalId, {
+          sourceKey,
+          streamVariantId: item.streamVariantId ?? null,
+        })
         if (generation !== playbackGeneration) return
         streamUrl.value = resolved.url
         streamType.value = resolved.contentType

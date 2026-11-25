@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useSources } from '../composables/useSources'
 import { useCatalogs } from '../composables/useCatalogs'
+import { useAuth } from '../composables/useAuth'
 
 // Data-driven settings screen for one plugin: renders inputs from the plugin's declared
 // settings schema (GET /sources → plugins[].settings) and reads/writes values through
@@ -10,10 +11,11 @@ import { useCatalogs } from '../composables/useCatalogs'
 const props = defineProps({
   plugin: { type: Object, required: true },
 })
-const emit = defineEmits(['saved'])
+const emit = defineEmits(['saved', 'open-custom-settings'])
 
 const { fetchPluginSettings, savePluginSettings, fetchSources } = useSources()
 const { catalogs, fetchCatalogs } = useCatalogs()
+const { isSuperAdmin } = useAuth()
 
 const values = ref({})
 const loading = ref(false)
@@ -32,7 +34,8 @@ function catalogOptionsFor(field) {
     }))
 }
 
-const visibleFields = computed(() => props.plugin.settings ?? [])
+const visibleFields = computed(() => (props.plugin.settings ?? [])
+  .filter((field) => !field.hideFromGenericUi && (!field.superAdminOnly || isSuperAdmin.value)))
 
 watch(() => props.plugin.id, load, { immediate: true })
 
@@ -58,7 +61,7 @@ async function save() {
   message.value = ''
   try {
     const payload = {}
-    for (const field of props.plugin.settings) {
+    for (const field of visibleFields.value) {
       const value = values.value[field.key]
       // Blank secret = keep the stored value (the server skips it); blank non-secret
       // = delete, which resets the field to its schema default.
@@ -95,6 +98,21 @@ function placeholderFor(field) {
     </div>
 
     <template v-else>
+      <q-banner v-if="plugin.settingsNav?.uiPath" dense rounded class="q-mb-md">
+        <div class="row items-center justify-between q-gutter-sm">
+          <div class="col text-grey-5">
+            This plugin has a dedicated settings screen for its additional configuration.
+          </div>
+          <q-btn
+            flat
+            color="primary"
+            icon="tune"
+            label="Open settings screen"
+            @click="emit('open-custom-settings')"
+          />
+        </div>
+      </q-banner>
+
       <div v-if="!visibleFields.length" class="text-grey-6 q-mb-md">
         This plugin has no configurable settings.
       </div>

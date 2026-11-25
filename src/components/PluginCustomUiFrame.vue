@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { apiOrigin } from '../composables/useApi'
+import { useUserSettings } from '../composables/useUserSettings'
 import {
   buildPluginUiUrl,
   externalPluginUiUrl,
@@ -19,6 +20,7 @@ const emit = defineEmits(['open-details', 'play'])
 
 const frame = ref(null)
 const frameReady = ref(false)
+const { userSettings, loadUserSettings } = useUserSettings()
 
 const externalUiUrl = computed(() => externalPluginUiUrl(props.uiUrl))
 
@@ -52,8 +54,8 @@ async function handleApiRequest(message) {
       method: request.method,
       headers: {
         'Content-Type': 'application/json',
-        // Only the parent attaches credentials, and only to allowlisted settings/actions or
-        // the sanitized catalog-list response granted to plugin UIs.
+        // Only the parent attaches credentials, and only to allowlisted settings/actions,
+        // this plugin's data/source routes, or sanitized catalog-list data.
         Authorization: `Bearer ${token}`,
       },
       body: request.body,
@@ -101,6 +103,13 @@ function onMessage(event) {
   switch (message.type) {
     case 'ready':
       frameReady.value = true
+      void loadUserSettings().finally(() => {
+        const prefix = `plugin:${props.pluginKey}:`
+        const preferences = Object.fromEntries(Object.entries(userSettings.value)
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, value]) => [key.slice(prefix.length), value]))
+        reply({ type: 'context', preferences })
+      })
       break
     case 'api':
       if (!(typeof message.id === 'string' || typeof message.id === 'number') ||
@@ -111,7 +120,18 @@ function onMessage(event) {
       emit('open-details', message.externalId)
       break
     case 'play':
-      emit('play', message)
+      if (typeof message.externalId !== 'string' || message.externalId.length === 0 ||
+          message.externalId.length > 512 || typeof message.sourceKey !== 'string' ||
+          !/^[a-zA-Z0-9._-]{1,128}$/.test(message.sourceKey)) return
+      emit('play', {
+        externalId: message.externalId,
+        sourceKey: message.sourceKey,
+        streamVariantId: typeof message.streamVariantId === 'string' && message.streamVariantId.length <= 256
+          ? message.streamVariantId : null,
+        title: typeof message.title === 'string' ? message.title : null,
+        artworkUrl: typeof message.artworkUrl === 'string' ? message.artworkUrl : null,
+        overview: typeof message.overview === 'string' ? message.overview : null,
+      })
       break
   }
 }

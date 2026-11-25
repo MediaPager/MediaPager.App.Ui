@@ -36,6 +36,15 @@ test('bridge allows this plugin settings/actions and sanitized catalog-picker da
   }, pluginId), {
     method: 'POST', path: `/plugins/${pluginId}/actions/run`, body: '{"externalId":"42"}',
   })
+
+  assert.deepEqual(validatePluginUiApiRequest({
+    method: 'POST', url: `/plugins/${pluginId}/agents/catalog-refresh/run`,
+  }, pluginId), {
+    method: 'POST', path: `/plugins/${pluginId}/agents/catalog-refresh/run`, body: undefined,
+  })
+  assert.equal(validatePluginUiApiRequest({
+    method: 'POST', url: `/plugins/${pluginId}/agents/catalog-refresh/run`, body: { arbitrary: true },
+  }, pluginId), null)
 })
 
 test('plugin UIs can request only the sanitized read-only catalog picker data', () => {
@@ -45,6 +54,59 @@ test('plugin UIs can request only the sanitized read-only catalog picker data', 
   assert.deepEqual(validatePluginUiApiRequest({ method: 'GET', url: '/catalogs' }, 'mediapager.stream.sample'), {
     method: 'GET', path: '/catalogs', body: undefined, catalogList: true,
   })
+})
+
+test('packaged main-nav UI can read only its own paged plugin data', () => {
+  assert.deepEqual(validatePluginUiApiRequest({
+    method: 'GET', url: `/plugins/${pluginId}/data/public.records?offset=250&limit=100`,
+  }, pluginId), {
+    method: 'GET',
+    path: `/plugins/${pluginId}/data/public.records?offset=250&limit=100`,
+    body: undefined,
+    pluginData: true,
+  })
+  assert.equal(validatePluginUiApiRequest({
+    method: 'GET', url: `/plugins/${pluginId}/data/public.records?includeUrls=true`,
+  }, pluginId), null)
+  assert.equal(validatePluginUiApiRequest({
+    method: 'GET', url: `/plugins/${pluginId}/data/public.records?limit=501`,
+  }, pluginId), null)
+  assert.deepEqual(validatePluginUiApiRequest({
+    method: 'GET', url: `/plugins/${pluginId}/data/public.records/record-1`,
+  }, pluginId), {
+    method: 'GET',
+    path: `/plugins/${pluginId}/data/public.records/record-1`,
+    body: undefined,
+    pluginData: true,
+  })
+  assert.equal(validatePluginUiApiRequest({
+    method: 'GET', url: `/plugins/${pluginId}/data/private.records/record-1`,
+  }, pluginId), null)
+})
+
+test('packaged main-nav UI can browse and read details from its own declared source', () => {
+  assert.deepEqual(validatePluginUiApiRequest({
+    method: 'GET', url: `/plugins/${pluginId}/sources/source-one/browse?query=sample&page=2`,
+  }, pluginId), {
+    method: 'GET',
+    path: `/plugins/${pluginId}/sources/source-one/browse?query=sample&page=2`,
+    body: undefined,
+    pluginSourceBrowse: true,
+  })
+  assert.deepEqual(validatePluginUiApiRequest({
+    method: 'GET', url: `/plugins/${pluginId}/sources/source-one/details/item-1`,
+  }, pluginId), {
+    method: 'GET',
+    path: `/plugins/${pluginId}/sources/source-one/details/item-1`,
+    body: undefined,
+    pluginSourceDetails: true,
+  })
+  assert.equal(validatePluginUiApiRequest({
+    method: 'GET', url: `/plugins/${pluginId}/sources/source-one/browse?includePaths=true`,
+  }, pluginId), null)
+  assert.equal(validatePluginUiApiRequest({
+    method: 'GET', url: '/plugins/mediapager.email.smtp/sources/source-one/browse',
+  }, pluginId), null)
 })
 
 test('bridge rejects other plugins, arbitrary APIs, URL overrides, and unsafe methods', () => {
@@ -60,6 +122,9 @@ test('bridge rejects other plugins, arbitrary APIs, URL overrides, and unsafe me
     { method: 'GET', url: `https://app.example/plugins/${pluginId}/settings` },
     { method: 'GET', url: `/plugins/${pluginId}/settings?includeSecrets=true` },
     { method: 'POST', url: `/plugins/${pluginId}/actions/a%2Fb` },
+    { method: 'POST', url: '/plugins/mediapager.email.smtp/agents/refresh/run' },
+    { method: 'POST', url: `/plugins/${pluginId}/agents/../run` },
+    { method: 'POST', url: `/plugins/${pluginId}/agents/refresh/run?force=true` },
   ]
   for (const request of denied) assert.equal(validatePluginUiApiRequest(request, pluginId), null)
 })

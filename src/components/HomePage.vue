@@ -124,7 +124,7 @@ const {
   clearTvFilters,
 } = useTvShows()
 const { streamTabs, streamTab, sourceTabs, availableStreamKinds, activeMediaKind, isSourceTab } = useStreamTabs()
-const { onPlay } = usePlayback()
+const { onPlay, onPlaySourceItem } = usePlayback()
 const { navCatalogs, navCatalogsLoaded, saveNavOrder } = useCatalogs()
 const {
   items,
@@ -229,7 +229,29 @@ const activeSourceTab = computed(() => {
 // 404 handling: a stream tab that matches neither a built-in kind nor a loaded source,
 // or a catalog name that isn't in the user's nav, is a bad URL — render the 404 page
 // in place (the address bar keeps the offending path).
-const { loaded: sourcesLoaded, hasOnlineStreamProvider, pluginMainNav } = useSources()
+const { sources, loaded: sourcesLoaded, fetchSources, hasOnlineStreamProvider, pluginMainNav } = useSources()
+
+async function playPluginItem(message) {
+  if (!message || typeof message !== 'object' || typeof message.externalId !== 'string' ||
+      message.externalId.length === 0 || message.externalId.length > 512 ||
+      typeof message.sourceKey !== 'string' || message.sourceKey.length > 128) return
+
+  if (!sourcesLoaded.value) await fetchSources()
+  const active = activeSourceTab.value
+  const source = sources.value.find(entry =>
+    entry.key === message.sourceKey && entry.pluginId === active?.pluginId &&
+    entry.key === active?.sourceKey)
+  if (!source || typeof source.kind !== 'string') return
+
+  await onPlaySourceItem({
+    externalId: message.externalId,
+    streamVariantId: typeof message.streamVariantId === 'string' ? message.streamVariantId : null,
+    kind: source.kind,
+    title: typeof message.title === 'string' ? message.title.slice(0, 500) : message.externalId,
+    artworkUrl: typeof message.artworkUrl === 'string' ? message.artworkUrl : null,
+    overview: typeof message.overview === 'string' ? message.overview.slice(0, 4000) : null,
+  }, source.key)
+}
 const streamTabNotFound = computed(() =>
   route.name === 'stream' &&
   sourcesLoaded.value &&
@@ -467,10 +489,11 @@ const catalogSlugToMediaTab = {
 
 const activeMediaTabKey = computed(() => route.name === 'catalog'
   ? catalogSlugToMediaTab[selectedCatalog.value?.catalogType?.slug] ?? null
-  : activeMediaKind.value)
+  : streamTab.value)
 
 function mediaTabEnabled(tabKey) {
   if (route.name === 'catalog') return activeMediaTabKey.value === tabKey
+  if (isSourceTab(tabKey)) return sourceTabs.value.some((source) => source.key === tabKey)
   return availableStreamKinds.value.has(tabKey)
 }
 
@@ -744,6 +767,7 @@ function onDragEnd() {
         class="home-panel"
         :class="{
           'home-panel--with-tabs': homeTab === 'stream',
+          'home-panel--custom-source': homeTab === 'stream' && activeSourceTab?.customUi,
           'home-panel--catalog': homeTab.startsWith('catalog:'),
           'home-panel--pulling': pullRefreshDistance > 0,
         }"
@@ -1048,6 +1072,7 @@ function onDragEnd() {
               :key="activeSourceTab.sourceKey"
               :plugin-key="activeSourceTab.pluginId ?? activeSourceTab.sourceKey"
               :ui-url="activeSourceTab.uiUrl"
+              @play="playPluginItem"
             />
             <SourceBrowseGrid
               v-else

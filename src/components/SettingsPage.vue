@@ -135,6 +135,12 @@ function openPluginSettings(pluginId) {
   }
 }
 
+function openPluginCustomSettings(pluginId) {
+  if (!sourcePlugins.value.some((plugin) => plugin.id === pluginId && plugin.settingsNav?.uiPath)) return
+  settingsDialogPlugin.value = null
+  settingsTab.value = `plugin-nav:${pluginId}`
+}
+
 watch(sourcePlugins, () => {
   if (!pendingSettingsId) return
   const found = sourcePlugins.value.find((plugin) => plugin.id === pendingSettingsId)
@@ -274,7 +280,7 @@ const isPluginTab = computed(() => settingsTab.value.startsWith('plugin-nav:'))
 // The plugin-management screen (install/uninstall, per-plugin settings gear) is
 // admin:super only — a fixed tab alongside the core settings sections.
 const manageGroup = computed(() =>
-  isSuperAdmin.value ? [{ name: 'plugins', label: 'Plugins', manage: true }] : [])
+  isSuperAdmin.value ? [{ name: 'plugins', label: 'Plugins', icon: 'extension', manage: true }] : [])
 
 const pluginNavGroups = computed(() => pluginSettingsNav.value.map((entry) => ({
   name: entry.key,
@@ -827,6 +833,7 @@ async function sendInvite() {
             :key="settingsDialogPlugin.id"
             :plugin="settingsDialogPlugin"
             @saved="fetchSetupChecklist"
+            @open-custom-settings="openPluginCustomSettings(settingsDialogPlugin.id)"
           />
         </q-card-section>
       </q-card>

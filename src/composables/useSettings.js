@@ -16,12 +16,14 @@ export const settingsGroups = [
   {
     name: 'setup',
     label: 'Setup',
+    icon: 'checklist',
     // Rendered by a dedicated checklist template. Each failed item can jump to its tab.
     fields: [],
   },
   {
     name: 'general',
     label: 'General',
+    icon: 'settings',
     fields: [
       { key: 'Settings:Site:BaseUrl', label: 'Site URL (invitation and password-reset links)', type: 'text' },
     ],
@@ -42,7 +44,7 @@ export const settingsGroups = [
     ],
   },
   { name: 'users', label: 'Users & invitations', icon: 'manage_accounts', fields: [] },
-  { name: 'catalogs', label: 'Catalogs', fields: [] },
+  { name: 'catalogs', label: 'Catalogs', icon: 'library_books', fields: [] },
 ]
 
 export function useSettings() {

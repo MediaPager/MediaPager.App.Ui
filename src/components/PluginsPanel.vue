@@ -25,11 +25,12 @@ const uninstallingId = ref('')
 const disablingId = ref('')
 const enablingId = ref('')
 const confirmTarget = ref(null)
+const disableTarget = ref(null)
 const removeUnusedDependencies = ref(false)
 let apiRestartTimer = null
 
-const CATEGORY_ORDER = ['search', 'subtitles', 'email', 'metadata', 'stream', 'interface', 'actions', 'other']
-const PLUGIN_TYPES = ['search', 'subtitles', 'email', 'metadata', 'stream', 'interface', 'actions']
+const CATEGORY_ORDER = ['search', 'subtitles', 'email', 'metadata', 'stream', 'agents', 'interface', 'actions', 'other']
+const PLUGIN_TYPES = ['search', 'subtitles', 'email', 'metadata', 'stream', 'agents', 'interface', 'actions']
 
 function categoryLabel(category) {
   return category ? category.charAt(0).toUpperCase() + category.slice(1) : 'Other'
@@ -141,7 +142,7 @@ async function uninstall(plugin) {
     const { data } = await api.delete(`/plugins/${encodeURIComponent(plugin.id)}`, {
       params: { removeDependencies: removeUnusedDependencies.value },
     })
-    message.value = data?.message ?? `Turned off ${plugin.name}.`
+    message.value = data?.message ?? `Uninstalled ${plugin.name}.`
     if (data?.restarting) {
       retryAfterApiRestart()
       return
@@ -149,7 +150,7 @@ async function uninstall(plugin) {
     await load()
     fetchSources()
   } catch (requestError) {
-    error.value = requestError.response?.data?.detail ?? `Could not turn off ${plugin.name}.`
+    error.value = requestError.response?.data?.detail ?? `Could not uninstall ${plugin.name}.`
   } finally {
     uninstallingId.value = ''
   }
@@ -171,6 +172,16 @@ function retryAfterApiRestart(attempt = 0) {
 function askUninstall(plugin) {
   removeUnusedDependencies.value = false
   confirmTarget.value = plugin
+}
+
+function askDisable(plugin) {
+  disableTarget.value = plugin
+}
+
+async function confirmDisable() {
+  const plugin = disableTarget.value
+  disableTarget.value = null
+  if (plugin) await disablePlugin(plugin)
 }
 
 async function disablePlugin(plugin) {
@@ -608,7 +619,17 @@ function addFromDiscover(result) {
                 icon="power_settings_new"
                 label="turn off"
                 :loading="disablingId === plugin.id || uninstallingId === plugin.id"
-                @click="plugin.official ? disablePlugin(plugin) : askUninstall(plugin)"
+                @click="plugin.official ? disablePlugin(plugin) : askDisable(plugin)"
+              />
+              <q-btn
+                v-if="!plugin.official && (plugin.loaded || plugin.deployed)"
+                flat
+                dense
+                color="grey-5"
+                icon="delete_outline"
+                label="uninstall"
+                :loading="uninstallingId === plugin.id"
+                @click="askUninstall(plugin)"
               />
             </div>
           </q-item-section>
@@ -620,10 +641,9 @@ function addFromDiscover(result) {
 
     <q-dialog :model-value="!!confirmTarget" @update:model-value="confirmTarget = null">
       <q-card dark class="confirm-card">
-        <q-card-section class="text-h6">Turn off {{ confirmTarget?.name }}?</q-card-section>
+        <q-card-section class="text-h6">Uninstall {{ confirmTarget?.name }}?</q-card-section>
         <q-card-section class="text-grey-6">
-          The plugin is unloaded now and stays off after a restart. Its files are kept, so
-          you can turn it back on later.
+          This removes the plugin's installed files. You can install it again later.
         </q-card-section>
         <q-card-section v-if="confirmTarget?.requires?.length" class="q-pt-none">
           <q-checkbox
@@ -637,7 +657,21 @@ function addFromDiscover(result) {
         </q-card-section>
         <q-card-actions align="right">
           <q-btn flat label="cancel" color="grey-5" v-close-popup />
-          <q-btn unelevated label="turn off" color="negative" @click="uninstall(confirmTarget)" v-close-popup />
+          <q-btn unelevated label="uninstall" color="negative" @click="uninstall(confirmTarget)" v-close-popup />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <q-dialog :model-value="!!disableTarget" @update:model-value="disableTarget = null">
+      <q-card dark class="confirm-card">
+        <q-card-section class="text-h6">Turn off {{ disableTarget?.name }}?</q-card-section>
+        <q-card-section class="text-grey-6">
+          The plugin will be unloaded and stay off after a restart. Its installed files are kept,
+          so you can turn it back on later.
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn flat label="cancel" color="grey-5" v-close-popup />
+          <q-btn unelevated label="turn off" color="negative" @click="confirmDisable" v-close-popup />
         </q-card-actions>
       </q-card>
     </q-dialog>

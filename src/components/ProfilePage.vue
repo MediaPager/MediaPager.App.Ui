@@ -1,9 +1,10 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { useUserSettings } from '../composables/useUserSettings'
+import { useSources } from '../composables/useSources'
 import { usePlayback, languages } from '../composables/usePlayback'
 import SubtitleStyleControls from './SubtitleStyleControls.vue'
 import ChangePasswordDialog from './ChangePasswordDialog.vue'
@@ -11,8 +12,20 @@ import ChangePasswordDialog from './ChangePasswordDialog.vue'
 const router = useRouter()
 
 const { accessToken, userScopes, currentUserEmail, setSession, signOut } = useAuth()
-const { autoplay, setAutoplay } = useUserSettings()
+const { autoplay, setAutoplay, userSettings, setPluginPreference, loadUserSettings } = useUserSettings()
+const { plugins: sourcePlugins, fetchSources } = useSources()
 const { subLang } = usePlayback()
+
+const profilePluginPreferences = computed(() => sourcePlugins.value.flatMap(plugin =>
+  (plugin.userSettings ?? []).map(preference => {
+    const key = `plugin:${plugin.id}:${preference.key}`
+    const fallback = String(preference.defaultValue ?? false)
+    return {
+      ...preference,
+      pluginId: plugin.id,
+      value: String(userSettings.value[key] ?? fallback).toLowerCase() === 'true',
+    }
+  })))
 
 const profileTab = ref('player')
 const changePasswordOpen = ref(false)
@@ -189,6 +202,8 @@ function openEmailForm() {
 onMounted(() => {
   void fetchProfile()
   void fetchMobileSessions()
+  void fetchSources()
+  void loadUserSettings()
 })
 </script>
 
@@ -232,6 +247,17 @@ onMounted(() => {
                   dark
                   label="Autoplay next episode (TV shows)"
                 />
+              </div>
+
+              <div v-for="preference in profilePluginPreferences" :key="`${preference.pluginId}:${preference.key}`" class="profile-section">
+                <div class="profile-section-title">{{ preference.label }}</div>
+                <q-toggle
+                  :model-value="preference.value"
+                  @update:model-value="(value) => setPluginPreference(preference.pluginId, preference.key, value)"
+                  dark
+                  :aria-label="preference.label"
+                />
+                <div v-if="preference.description" class="text-caption text-grey-6">{{ preference.description }}</div>
               </div>
 
               <div class="profile-section">

@@ -199,6 +199,31 @@
   padding-top: 0;
 }
 
+/* A packaged source UI sits below, not behind, the Stream source-tab bar. Keep the
+   iframe inside the remaining panel height so its own viewport does not scroll the page. */
+.home-panel.home-panel--custom-source {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.home-panel.home-panel--custom-source .stream-tabs {
+  position: relative;
+  top: auto;
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
+
+.home-panel.home-panel--custom-source .plugin-frame-wrap {
+  position: relative;
+  inset: auto;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
 .home-panel.home-panel--catalog {
   padding-top: 8px;
 }

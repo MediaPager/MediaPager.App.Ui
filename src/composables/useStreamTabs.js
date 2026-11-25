@@ -51,7 +51,14 @@ export function useStreamTabs() {
     )
     return new Set(declared.filter(Boolean))
   })
-  const streamTabs = computed(() => builtinStreamTabs.filter((tab) => availableStreamKinds.value.has(tab.key)))
+  const streamTabs = computed(() => [
+    ...builtinStreamTabs.filter((tab) => availableStreamKinds.value.has(tab.key)),
+    ...sourceTabs.value.filter((source) => source.customUi).map((source) => ({
+      key: source.key,
+      label: source.label,
+      icon: source.icon ?? 'play_circle',
+    })),
+  ])
   const activeMediaKind = computed(() => {
     if (!streamTab.value.startsWith('source:')) return streamTab.value
     const source = sourceTabs.value.find((entry) => entry.key === streamTab.value)
